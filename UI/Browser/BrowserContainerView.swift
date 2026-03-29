@@ -359,7 +359,7 @@ struct TabPill: View {
 
             Text(tab.displayTitle)
                 .font(.caption2)
-                .foregroundStyle(isActive ? .white : .secondary)
+                .foregroundStyle(isActive ? Color.white : Color.secondary)
                 .lineLimit(1)
                 .frame(maxWidth: 100)
 

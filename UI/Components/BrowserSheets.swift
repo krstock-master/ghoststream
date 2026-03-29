@@ -63,7 +63,7 @@ struct BrowserMenuView: View {
     private func menuRow(_ title: String, icon: String, color: Color = GhostTheme.accent, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: icon)
-                .foregroundStyle(color == .red ? color : .primary)
+                .foregroundStyle(color == .red ? color : Color.primary)
         }
     }
 }

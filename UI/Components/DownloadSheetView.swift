@@ -86,7 +86,7 @@ struct DownloadSheetView: View {
                             } label: {
                                 HStack {
                                     Image(systemName: selectedQuality == q ? "largecircle.fill.circle" : "circle")
-                                        .foregroundStyle(selectedQuality == q ? GhostTheme.accent : .tertiary)
+                                        .foregroundStyle(selectedQuality == q ? GhostTheme.accent : Color.gray.opacity(0.5))
                                     Text(q)
                                         .foregroundStyle(.white)
                                     if q == "720p" {
@@ -154,7 +154,7 @@ struct DownloadSheetView: View {
     private func saveOption(_ text: String, selected: Bool) -> some View {
         HStack {
             Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                .foregroundStyle(selected ? GhostTheme.accent : .tertiary)
+                .foregroundStyle(selected ? GhostTheme.accent : Color.gray.opacity(0.5))
             Text(text).foregroundStyle(.white)
             Spacer()
         }

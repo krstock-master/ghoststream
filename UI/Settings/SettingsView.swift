@@ -149,7 +149,7 @@ struct DoHSettingsView: View {
                 } label: {
                     HStack(spacing: 12) {
                         Image(systemName: provider.icon)
-                            .foregroundStyle(dns.activeProvider == provider ? GhostTheme.accent : .secondary)
+                            .foregroundStyle(dns.activeProvider == provider ? GhostTheme.accent : Color.gray)
                             .frame(width: 24)
 
                         VStack(alignment: .leading, spacing: 2) {
