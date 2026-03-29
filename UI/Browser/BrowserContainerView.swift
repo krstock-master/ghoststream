@@ -1,5 +1,4 @@
 // UI/Browser/BrowserContainerView.swift
-// Safari iOS 15+ style: bottom address bar, swipe tabs
 import SwiftUI
 import WebKit
 
@@ -19,26 +18,31 @@ struct BrowserContainerView: View {
     @State private var webViewRef: WKWebView?
     @State private var isElementHideMode = false
     @State private var isAddressEditing = false
+    @FocusState private var isURLFieldFocused: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Element hide mode banner
-            if isElementHideMode { elementHideBanner }
+        ZStack {
+            VStack(spacing: 0) {
+                // Element hide banner
+                if isElementHideMode { elementHideBanner }
 
-            // WebView fills ALL available space
-            ZStack(alignment: .bottom) {
-                webArea.frame(maxWidth: .infinity, maxHeight: .infinity)
-                if showMediaSnackbar, let media = latestMedia {
-                    snackbar(media).padding(.horizontal, 16).padding(.bottom, 70)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                // URL bar at TOP when editing (keyboard visible)
+                if isAddressEditing { topSearchBar }
+
+                // WebView
+                ZStack(alignment: .bottom) {
+                    webArea.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if showMediaSnackbar, let media = latestMedia {
+                        snackbar(media).padding(.horizontal, 16).padding(.bottom, isAddressEditing ? 12 : 70)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                 }
-            }
 
-            // Safari-style bottom bar
-            bottomBar
+                // Bottom bar (hidden when keyboard is up)
+                if !isAddressEditing { bottomBar }
+            }
         }
         .background(Color(.systemBackground))
-        .ignoresSafeArea(.keyboard)
         .onChange(of: tabManager.activeTab?.url) { _, url in
             if !isAddressEditing { addressText = url?.absoluteString ?? "" }
         }
@@ -63,15 +67,42 @@ struct BrowserContainerView: View {
     private var elementHideBanner: some View {
         HStack {
             Image(systemName: "eye.slash.fill").foregroundStyle(.white)
-            Text("숨기려는 요소를 탭하세요").font(.caption).foregroundStyle(.white)
+            Text("숨기려는 요소를 탭하세요").font(.subheadline).foregroundStyle(.white)
             Spacer()
             Button("완료") {
                 isElementHideMode = false
                 webViewRef?.evaluateJavaScript("window._gsToggleHideMode()")
-            }.font(.caption.bold()).foregroundStyle(.white)
-            .padding(.horizontal, 12).padding(.vertical, 4)
+            }.font(.subheadline.bold()).foregroundStyle(.white)
+            .padding(.horizontal, 14).padding(.vertical, 6)
             .background(.white.opacity(0.25), in: Capsule())
-        }.padding(.horizontal, 12).padding(.vertical, 8).background(.red)
+        }.padding(.horizontal, 16).padding(.vertical, 10).background(.red)
+    }
+
+    // MARK: - Top Search Bar (visible when editing URL)
+    private var topSearchBar: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.system(size: 15))
+                TextField("검색어 또는 주소 입력", text: $addressText)
+                    .textFieldStyle(.plain).font(.system(size: 16))
+                    .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    .focused($isURLFieldFocused)
+                    .onSubmit { navigateTo(addressText); closeSearch() }
+                if !addressText.isEmpty {
+                    Button { addressText = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: 12))
+
+            Button("취소") { closeSearch() }
+                .font(.system(size: 16)).foregroundStyle(.teal)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(Color(.systemBackground))
+        .onAppear { isURLFieldFocused = true }
     }
 
     // MARK: - Web Area
@@ -115,7 +146,7 @@ struct BrowserContainerView: View {
     // MARK: - Safari-Style Bottom Bar
     private var bottomBar: some View {
         VStack(spacing: 0) {
-            // Progress bar
+            // Progress
             if tabManager.activeTab?.isLoading == true {
                 GeometryReader { geo in
                     Rectangle().fill(Color.teal)
@@ -123,51 +154,38 @@ struct BrowserContainerView: View {
                 }.frame(height: 2)
             }
 
-            // Address bar (Safari-style pill)
-            HStack(spacing: 8) {
-                if !isAddressEditing {
-                    // Compact mode: show domain only
-                    Button { withAnimation { isAddressEditing = true } } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: tabManager.activeTab?.isSecure == true ? "lock.fill" : "lock.open.fill")
-                                .font(.system(size: 10)).foregroundStyle(tabManager.activeTab?.isSecure == true ? Color.secondary : Color.red)
-                            Text(tabManager.activeTab?.url?.host ?? "검색 또는 주소 입력")
-                                .font(.system(size: 14)).foregroundStyle(.primary).lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: 10))
+            // Address bar pill (tap to edit)
+            Button { withAnimation(.easeInOut(duration: 0.25)) { isAddressEditing = true; addressText = tabManager.activeTab?.url?.absoluteString ?? "" } } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: tabManager.activeTab?.isSecure == true ? "lock.fill" : "lock.open.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(tabManager.activeTab?.isSecure == true ? Color.secondary : Color.red)
+                    Text(tabManager.activeTab?.url?.host ?? "검색 또는 주소 입력")
+                        .font(.system(size: 15)).foregroundStyle(.primary).lineLimit(1)
+                    Spacer()
+                    if tabManager.activeTab?.isLoading == true {
+                        ProgressView().scaleEffect(0.6)
                     }
-                } else {
-                    // Edit mode: full URL text field
-                    HStack(spacing: 6) {
-                        TextField("검색 또는 주소 입력", text: $addressText)
-                            .textFieldStyle(.plain).font(.system(size: 14))
-                            .autocorrectionDisabled().textInputAutocapitalization(.never)
-                            .onSubmit { navigateTo(addressText); withAnimation { isAddressEditing = false } }
-                        Button { withAnimation { isAddressEditing = false } } label: {
-                            Text("취소").font(.system(size: 14)).foregroundStyle(.teal)
-                        }
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 8)
-                    .background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: 10))
                 }
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .frame(maxWidth: .infinity)
+                .background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .padding(.horizontal, 12).padding(.top, 8)
 
-            // Toolbar buttons
+            // Toolbar: ◁ ▷ Share Downloads Tabs Settings
             HStack(spacing: 0) {
                 tbtn("chevron.left", tabManager.activeTab?.canGoBack == true) { webViewRef?.goBack() }
                 tbtn("chevron.right", tabManager.activeTab?.canGoForward == true) { webViewRef?.goForward() }
-                
-                // Share / Actions menu
+
+                // Share + Tools menu
                 Menu {
-                    Section("탭") {
+                    Section {
                         Button { tabManager.newTab() } label: { Label("새 탭", systemImage: "plus.square") }
                         Button { tabManager.newTab(isPrivate: true) } label: { Label("프라이빗 탭", systemImage: "lock.square") }
                     }
-                    Section("도구") {
-                        Button { showDownloads = true } label: { Label("다운로드", systemImage: "arrow.down.circle") }
+                    Section {
+                        Button { webViewRef?.reload() } label: { Label("새로고침", systemImage: "arrow.clockwise") }
                         Button {
                             isElementHideMode = true
                             webViewRef?.evaluateJavaScript("window._gsToggleHideMode()")
@@ -175,29 +193,27 @@ struct BrowserContainerView: View {
                         Button {
                             if let h = tabManager.activeTab?.url?.host { ElementHiderStore.shared.clearRules(for: h); webViewRef?.reload() }
                         } label: { Label("숨긴 요소 복원", systemImage: "eye") }
-                        Button { webViewRef?.reload() } label: { Label("새로고침", systemImage: "arrow.clockwise") }
                     }
                     Section {
                         Button { showPrivacy = true } label: { Label("프라이버시", systemImage: "shield.checkered") }
-                        Button { showSettings = true } label: { Label("설정", systemImage: "gearshape") }
                     }
                 } label: {
                     Image(systemName: "square.and.arrow.up").font(.system(size: 18))
                         .frame(maxWidth: .infinity).frame(height: 44)
                 }
 
-                // Downloads badge
+                // Downloads
                 Button { showDownloads = true } label: {
                     ZStack(alignment: .topTrailing) {
                         Image(systemName: "arrow.down.circle").font(.system(size: 18))
                             .frame(maxWidth: .infinity).frame(height: 44)
-                        if !downloadManager.downloads.isEmpty {
+                        if !downloadManager.downloads.isEmpty || !downloadManager.completedDownloads.isEmpty {
                             Circle().fill(.teal).frame(width: 8, height: 8).offset(x: -14, y: 10)
                         }
                     }
                 }
 
-                // Tab grid
+                // Tabs
                 Button { showTabGrid = true } label: {
                     ZStack {
                         RoundedRectangle(cornerRadius: 5).stroke(Color.primary.opacity(0.5), lineWidth: 1.5)
@@ -205,10 +221,16 @@ struct BrowserContainerView: View {
                         Text("\(tabManager.tabs.count)").font(.system(size: 11, weight: .medium))
                     }.frame(maxWidth: .infinity).frame(height: 44)
                 }
+
+                // Settings (직접 접근)
+                Button { showSettings = true } label: {
+                    Image(systemName: "gearshape").font(.system(size: 18))
+                        .frame(maxWidth: .infinity).frame(height: 44)
+                }
             }
-            .padding(.bottom, 2)
+            .padding(.bottom, 4)
         }
-        .background(Color(.systemBackground))
+        .background(.ultraThinMaterial)
     }
 
     private func tbtn(_ icon: String, _ on: Bool, action: @escaping () -> Void) -> some View {
@@ -228,6 +250,11 @@ struct BrowserContainerView: View {
             guard let u = URL(string: "\(container.settingsStore.searchEngineURL)\(enc)") else { return }; url = u
         }
         tabManager.activeTab?.url = url; webViewRef?.load(URLRequest(url: url)); addressText = url.absoluteString
+    }
+
+    private func closeSearch() {
+        withAnimation(.easeInOut(duration: 0.25)) { isAddressEditing = false }
+        isURLFieldFocused = false
     }
 }
 

@@ -241,6 +241,8 @@ enum WebViewConfigurator {
         b.ontouchend=function(e){e.stopPropagation();};
         w.appendChild(b);
         v.addEventListener('webkitbeginfullscreen',function(){var src=v.currentSrc||v.src;if(src)window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p'});});
+        v.addEventListener('webkitpresentationmodechanged',function(e){if(v.webkitPresentationMode==='fullscreen'){var src=v.currentSrc||v.src;if(src)window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p'});}});
+        v.addEventListener('play',function(){if(!v.dataset.gsPlayed){v.dataset.gsPlayed='1';var src=v.currentSrc||v.src;if(src){window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:src,type:src.includes('.m3u8')?'hls':'mp4',label:(v.videoHeight||'Auto')+'p'}],title:document.title,referer:location.href,thumb:v.poster||null});}}});
     }
 
     function scan(){
@@ -274,6 +276,20 @@ enum WebViewConfigurator {
         p.unshift(t);c=c.parentElement;}sel=p.join('>');}
         el.style.display='none';el.style.outline='';hlEl=null;
         window.webkit.messageHandlers.elementHidden.postMessage({selector:sel});},{passive:false,capture:true});
+
+    // Long-press on images → download
+    document.addEventListener('contextmenu',function(e){
+        var el=e.target;
+        if(el.tagName==='IMG'&&el.src){
+            window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:el.src,type:el.src.match(/\.gif(\\?|$)/i)?'gif':'image',label:'Image'}],title:el.alt||document.title,referer:location.href,thumb:null});
+        }
+        if(el.tagName==='VIDEO'||(el.closest&&el.closest('video'))){
+            var v=el.tagName==='VIDEO'?el:el.closest('video');
+            var src=v.currentSrc||v.src||'';
+            v.querySelectorAll('source').forEach(function(s){if(!src&&s.src)src=s.src;});
+            if(src)window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p'});
+        }
+    },true);
 
     new MutationObserver(scan).observe(document.body||document.documentElement,{childList:true,subtree:true});
     setTimeout(scan,800);setTimeout(scan,2500);setTimeout(scan,5000);
