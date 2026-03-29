@@ -253,7 +253,7 @@ enum WebViewConfigurator {
             if(s.length)window.webkit.messageHandlers.mediaFound.postMessage({sources:s,title:document.title,referer:location.href,thumb:v.poster||null});
         });
         document.querySelectorAll('img').forEach(function(img){var src=img.src||'';
-            if(src.match(/\\.gif(\\?|$)/i))window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:src,type:'gif',label:'GIF'}],title:img.alt||'GIF',referer:location.href,thumb:null});
+            var isGif=el.src.toLowerCase().indexOf('.gif')!==-1;window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:el.src,type:isGif?'gif':'image',label:'Image'}],title:el.alt||document.title,referer:location.href,thumb:null});
         });
         if(typeof jwplayer!=='undefined'){document.querySelectorAll('[id]').forEach(function(el){try{var p=jwplayer(el.id);if(!p||!p.getState)return;
             function ex(){var it=p.getPlaylistItem()||{};var ss=(it.sources||[]).map(function(s){return{url:s.file,type:s.file&&s.file.includes('.m3u8')?'hls':'mp4',label:s.label||'default'};});
