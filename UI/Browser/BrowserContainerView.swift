@@ -41,6 +41,11 @@ struct BrowserContainerView: View {
         .background(GhostTheme.bg)
         .ignoresSafeArea(.keyboard)
         .onChange(of: tabManager.activeTab?.url) { _, url in addressText = url?.absoluteString ?? "" }
+        .onReceive(NotificationCenter.default.publisher(for: .openInNewTab)) { notif in
+            if let url = notif.object as? URL {
+                tabManager.newTab(url: url)
+            }
+        }
         .sheet(isPresented: $showDownloadSheet) { DownloadSheetView(media: latestMedia) }
         .sheet(isPresented: $showVault) { VaultView() }
         .sheet(isPresented: $showSettings) { SettingsView() }

@@ -153,7 +153,8 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
         guard let url = dl.localURL else { return }
         do {
             try await vaultManager.store(fileURL: url, originalName: dl.media.title)
-            try? FileManager.default.removeItem(at: url)
+            // Keep original file so user can still play from Downloads
+            // File will be in both Downloads (playable) and Vault (encrypted)
         } catch {
             dl.error = "Vault 저장 실패: \(error.localizedDescription)"
         }

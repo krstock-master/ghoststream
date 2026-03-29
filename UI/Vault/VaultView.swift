@@ -20,6 +20,11 @@ struct VaultView: View {
             }
             .background(GhostTheme.bg)
             .navigationTitle("보관함").navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                if vault.isUnlocked {
+                    Task { await vault.reload() }
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {

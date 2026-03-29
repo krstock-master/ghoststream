@@ -111,6 +111,10 @@ final class VaultManager: @unchecked Sendable {
         return tmpURL
     }
 
+    func reload() async {
+        await loadMetadata()
+    }
+
     func delete(item: VaultItem) async throws {
         let path = vaultDirectory.appendingPathComponent(item.id)
         try FileManager.default.removeItem(at: path)

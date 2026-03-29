@@ -61,6 +61,53 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         return nil
     }
 
+    // Long-press context menu with download option
+    func webView(_ webView: WKWebView, contextMenuConfigurationFor elementInfo: WKContextMenuElementInfo) async
+        -> UIContextMenuConfiguration?
+    {
+        guard let url = elementInfo.linkURL else { return nil }
+        let ext = url.pathExtension.lowercased()
+        let isMedia = ["mp4", "m4v", "mov", "webm", "gif", "m3u8", "png", "jpg", "jpeg"].contains(ext)
+            || url.absoluteString.contains(".mp4") || url.absoluteString.contains(".gif")
+
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            var actions: [UIAction] = []
+
+            // Open in new tab
+            actions.append(UIAction(title: "새 탭에서 열기", image: UIImage(systemName: "plus.square")) { _ in
+                // Will be handled by the tab manager via notification
+                NotificationCenter.default.post(name: .openInNewTab, object: url)
+            })
+
+            // Download media
+            if isMedia {
+                actions.append(UIAction(title: "미디어 다운로드", image: UIImage(systemName: "arrow.down.circle")) { [weak self] _ in
+                    let type: DetectedMedia.MediaType = ext == "gif" ? .gif : ext == "m3u8" ? .hls : .mp4
+                    let media = DetectedMedia(url: url, type: type, quality: "Direct",
+                        title: url.deletingPathExtension().lastPathComponent,
+                        referer: self?.tab.url?.absoluteString ?? "", thumbnail: nil, estimatedSize: nil)
+                    self?.onMediaDetected(media)
+                })
+            }
+
+            // Copy link
+            actions.append(UIAction(title: "링크 복사", image: UIImage(systemName: "doc.on.doc")) { _ in
+                UIPasteboard.general.url = url
+            })
+
+            // Share
+            actions.append(UIAction(title: "공유", image: UIImage(systemName: "square.and.arrow.up")) { _ in
+                if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let root = scene.windows.first?.rootViewController {
+                    let vc = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+                    root.present(vc, animated: true)
+                }
+            })
+
+            return UIMenu(children: actions)
+        }
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
         case "mediaFound":
@@ -163,4 +210,10 @@ enum WebViewConfigurator {
     setTimeout(scan,1000);setTimeout(scan,3000);
     })();
     """
+}
+
+
+// MARK: - Notifications
+extension Notification.Name {
+    static let openInNewTab = Notification.Name("openInNewTab")
 }

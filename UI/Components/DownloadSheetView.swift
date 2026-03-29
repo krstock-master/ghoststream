@@ -121,20 +121,47 @@ struct DownloadSheetView: View {
                 Text("완료된 다운로드 없음").font(.subheadline).foregroundStyle(Color.gray).padding(.top, 60)
             } else {
                 ForEach(downloadManager.completedDownloads) { dl in
-                    HStack(spacing: 12) {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(GhostTheme.success)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(dl.media.title).font(.subheadline).foregroundStyle(.white).lineLimit(1)
-                            Text(dl.media.type.rawValue).font(.caption).foregroundStyle(Color.gray)
+                    VStack(spacing: 8) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(GhostTheme.success)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(dl.media.title).font(.subheadline).foregroundStyle(.white).lineLimit(1)
+                                Text(dl.media.type.rawValue).font(.caption).foregroundStyle(Color.gray)
+                            }
+                            Spacer()
+                            if dl.saveToVault {
+                                Image(systemName: "lock.fill").font(.caption).foregroundStyle(GhostTheme.accentAlt)
+                            }
                         }
-                        Spacer()
-                        if dl.saveToVault {
-                            Image(systemName: "lock.fill").font(.caption).foregroundStyle(GhostTheme.accentAlt)
+                        if let url = dl.localURL {
+                            HStack(spacing: 12) {
+                                ShareLink(item: url) {
+                                    Label("공유", systemImage: "square.and.arrow.up")
+                                        .font(.caption).foregroundStyle(GhostTheme.accent)
+                                }
+                                if !dl.saveToVault {
+                                    Button {
+                                        openFile(url)
+                                    } label: {
+                                        Label("열기", systemImage: "play.circle")
+                                            .font(.caption).foregroundStyle(GhostTheme.accent)
+                                    }
+                                }
+                                Spacer()
+                                Text(url.lastPathComponent).font(.caption2).foregroundStyle(Color.gray).lineLimit(1)
+                            }
                         }
                     }.padding(12).glass()
                 }
             }
         }.padding()
+    }
+
+    private func openFile(_ url: URL) {
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let root = scene.windows.first?.rootViewController else { return }
+        let vc = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        root.present(vc, animated: true)
     }
 }
 
