@@ -11,6 +11,9 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
 
     var downloadManager: MediaDownloadManager?
 
+    // CF bypass guard: prevents didFinish→reload→didFinish infinite loop
+    private var cfBypassPending = false
+
     init(tab: Tab, privacyEngine: PrivacyEngine, onMediaDetected: @escaping (DetectedMedia) -> Void) {
         self.tab = tab; self.privacyEngine = privacyEngine; self.onMediaDetected = onMediaDetected
     }
@@ -31,24 +34,26 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             }
         }
 
-        // ── Fix 3: Cloudflare challenge detection ──────────────────────────────
-        // If CF is spoofing our fingerprint and looping, set a bypass flag in
-        // sessionStorage so that on the next reload the fingerprint defense JS
-        // exits immediately and CF gets a real browser fingerprint.
+        // ── Cloudflare challenge detection (infinite-reload guard) ──────────────
+        guard !cfBypassPending else {
+            cfBypassPending = false  // reset after bypass-reload completes
+            return
+        }
         w.evaluateJavaScript("""
         (function(){
-            var isCF = document.title === 'Just a moment...'
-                || document.title.includes('Checking your browser')
-                || document.title.includes('Attention Required')
-                || !!document.querySelector('#challenge-form, .cf-browser-verification, #cf-wrapper, [data-translate="checking_browser"]')
-                || (location.hostname === 'challenges.cloudflare.com');
+            var t = document.title || '';
+            var isCF = t === 'Just a moment...'
+                || t.indexOf('Checking your browser') !== -1
+                || t.indexOf('Attention Required') !== -1
+                || !!document.querySelector('#challenge-form,.cf-browser-verification,#cf-wrapper')
+                || location.hostname === 'challenges.cloudflare.com';
             return isCF ? '1' : '0';
         })()
-        """) { [weak w] result, _ in
-            guard let str = result as? String, str == "1" else { return }
-            // Set bypass flag then reload so fingerprintDefenseJS skips spoofing
-            w?.evaluateJavaScript("try { sessionStorage.setItem('__gs_cf_bypass','1'); } catch(e) {}")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { w?.reload() }
+        """) { [weak self, weak w] result, _ in
+            guard let str = result as? String, str == "1", let self = self, let w = w else { return }
+            self.cfBypassPending = true
+            w.evaluateJavaScript("try{sessionStorage.setItem('__gs_cf_bypass','1');}catch(e){}")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { w.reload() }
         }
     }
     func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: any Error) { tab.isLoading = false }

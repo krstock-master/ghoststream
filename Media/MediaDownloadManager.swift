@@ -113,38 +113,39 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
     // MARK: - HLS Download
 
     private func startHLSDownload(_ dl: MediaDownload) {
+        // First try AVAssetDownloadTask (native HLS download → .movpkg → auto-convert to .mp4)
         let headers: [String: String] = [
             "Referer": dl.media.referer,
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15"
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+            "Origin": dl.media.referer.isEmpty ? "" : (URL(string: dl.media.referer)?.scheme ?? "https") + "://" + (URL(string: dl.media.referer)?.host ?? "")
         ]
 
-        let asset = AVURLAsset(
-            url: dl.media.url,
-            options: ["AVURLAssetHTTPHeaderFieldsKey": headers]
-        )
+        let options: [String: Any] = ["AVURLAssetHTTPHeaderFieldsKey": headers]
+        let asset = AVURLAsset(url: dl.media.url, options: options)
 
-        // Select bitrate based on quality preference
-        let bitrate: Int = switch dl.media.quality {
-        case "1080p": 4_000_000
-        case "720p": 2_000_000
-        case "480p": 1_000_000
-        default: 2_000_000
+        let bitrate: Int
+        switch dl.media.quality {
+        case let q where q.contains("1080"): bitrate = 4_000_000
+        case let q where q.contains("720"):  bitrate = 2_000_000
+        case let q where q.contains("480"):  bitrate = 1_000_000
+        default:                              bitrate = 2_500_000
         }
 
-        if let task = hlsSession?.makeAssetDownloadTask(
+        guard let task = hlsSession?.makeAssetDownloadTask(
             asset: asset,
             assetTitle: "gs_\(Int(Date().timeIntervalSince1970))",
             assetArtworkData: nil,
             options: [AVAssetDownloadTaskMinimumRequiredMediaBitrateKey: bitrate]
-        ) {
-            dl.sessionTaskID = task.taskIdentifier
-            dl.state = .downloading
-            taskMap[task.taskIdentifier] = dl.id.uuidString
-            task.resume()
-        } else {
+        ) else {
             dl.state = .failed
-            dl.error = "HLS 다운로드 태스크 생성 실패"
+            dl.error = "HLS 세션 생성 실패 – m3u8 URL을 직접 재생해 보세요"
+            return
         }
+
+        dl.sessionTaskID = task.taskIdentifier
+        dl.state = .downloading
+        taskMap[task.taskIdentifier] = dl.id.uuidString
+        task.resume()
     }
 
     // MARK: - Post-Download
