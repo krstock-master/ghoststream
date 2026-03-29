@@ -7,7 +7,6 @@ struct BrowserContainerView: View {
     @Environment(PrivacyEngine.self) private var privacyEngine
     @Environment(MediaDownloadManager.self) private var downloadManager
     @Environment(VaultManager.self) private var vaultManager
-    @Environment(VPNManager.self) private var vpnManager
     @Environment(DIContainer.self) private var container
 
     @State private var addressText = ""

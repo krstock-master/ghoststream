@@ -1,6 +1,4 @@
 // App/DI/Container.swift
-// GhostStream
-
 import SwiftUI
 
 @Observable
@@ -10,7 +8,6 @@ final class DIContainer: @unchecked Sendable {
     let privacyEngine: PrivacyEngine
     let vaultManager: VaultManager
     let dnsManager: DNSManager
-    let vpnManager: VPNManager
     let contentBlocker: ContentBlockerManager
     let settingsStore: SettingsStore
 
@@ -22,7 +19,6 @@ final class DIContainer: @unchecked Sendable {
         self.vaultManager = VaultManager()
         self.downloadManager = MediaDownloadManager(vaultManager: vaultManager)
         self.tabManager = TabManager()
-        self.vpnManager = VPNManager()
     }
 }
 
@@ -36,12 +32,7 @@ final class SettingsStore: @unchecked Sendable {
     @ObservationIgnored @AppStorage("dohProvider") var dohProvider: String = "cloudflare"
     @ObservationIgnored @AppStorage("defaultQuality") var defaultQuality: String = "720p"
     @ObservationIgnored @AppStorage("autoLockVault") var autoLockVault: Bool = true
-    @ObservationIgnored @AppStorage("vaultLockTimeout") var vaultLockTimeout: Int = 300
     @ObservationIgnored @AppStorage("forceDarkWeb") var forceDarkWeb: Bool = false
-    @ObservationIgnored @AppStorage("tabBarPosition") var tabBarPosition: String = "top"
-    @ObservationIgnored @AppStorage("enableVPN") var enableVPN: Bool = false
-    @ObservationIgnored @AppStorage("vpnAutoConnect") var vpnAutoConnect: Bool = false
-    @ObservationIgnored @AppStorage("vpnKillSwitch") var vpnKillSwitch: Bool = false
 
     var searchEngineURL: String {
         switch searchEngine {
