@@ -44,37 +44,10 @@ targets:
           - VPN/Tunnel/**
           - project.yml
           - GhostStream.entitlements
+          - GeneratedInfo.plist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ghoststream.browser
         PRODUCT_NAME: "GhostStream"
     info:
-      properties:
-        CFBundleDisplayName: GhostStream
-        LSRequiresIPhoneOS: true
-        ITSAppUsesNonExemptEncryption: false
-        UILaunchScreen:
-          UIColorName: AccentColor
-        UIApplicationSceneManifest:
-          UIApplicationSupportsMultipleScenes: true
-          UISceneConfigurations: {}
-        UISupportedInterfaceOrientations:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
-        UISupportedInterfaceOrientations~ipad:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationPortraitUpsideDown
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
-        UIBackgroundModes:
-          - fetch
-          - processing
-        NSFaceIDUsageDescription: "보관함 잠금 해제에 Face ID를 사용합니다."
-        NSUserTrackingUsageDescription: "GhostStream은 사용자를 추적하지 않습니다."
-        NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
-        BGTaskSchedulerPermittedIdentifiers:
-          - com.ghoststream.blocklist.update
-          - com.ghoststream.media.bg
-          - com.ghoststream.hls.bg
+      path: GeneratedInfo.plist
