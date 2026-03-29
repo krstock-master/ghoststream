@@ -1,49 +1,93 @@
 // Browser/WebViewManager.swift
 import SwiftUI
 import WebKit
+import Photos
 
-final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, @unchecked Sendable {
+final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKDownloadDelegate, @unchecked Sendable {
     let tab: Tab
     let privacyEngine: PrivacyEngine
     let onMediaDetected: (DetectedMedia) -> Void
+    private var pendingDownloadFilename: String?
 
     init(tab: Tab, privacyEngine: PrivacyEngine, onMediaDetected: @escaping (DetectedMedia) -> Void) {
         self.tab = tab; self.privacyEngine = privacyEngine; self.onMediaDetected = onMediaDetected
     }
 
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation n: WKNavigation!) {
-        tab.isLoading = true; tab.isSecure = webView.url?.scheme == "https"; tab.privacyReport.isHTTPS = tab.isSecure
+    // MARK: - Navigation
+    func webView(_ w: WKWebView, didStartProvisionalNavigation n: WKNavigation!) {
+        tab.isLoading = true; tab.isSecure = w.url?.scheme == "https"; tab.privacyReport.isHTTPS = tab.isSecure
     }
-    func webView(_ webView: WKWebView, didFinish n: WKNavigation!) {
-        tab.isLoading = false; tab.title = webView.title ?? ""; tab.url = webView.url
-        tab.canGoBack = webView.canGoBack; tab.canGoForward = webView.canGoForward
-        if let host = webView.url?.host {
+    func webView(_ w: WKWebView, didFinish n: WKNavigation!) {
+        tab.isLoading = false; tab.title = w.title ?? ""; tab.url = w.url
+        tab.canGoBack = w.canGoBack; tab.canGoForward = w.canGoForward
+        // Reapply element hider rules
+        if let host = w.url?.host {
             let rules = ElementHiderStore.shared.rules(for: host)
             if !rules.isEmpty {
                 let css = rules.joined(separator: ",") + "{display:none!important}"
-                webView.evaluateJavaScript("var s=document.createElement('style');s.textContent='\(css)';document.head.appendChild(s);")
+                w.evaluateJavaScript("var s=document.createElement('style');s.textContent='\(css)';document.head.appendChild(s);")
             }
         }
     }
     func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
     func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
 
-    func webView(_ w: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
-        guard let url = action.request.url else { return .cancel }
-        if let host = url.host, let pageHost = tab.url?.host, host != pageHost {
-            tab.privacyReport.thirdPartyDomains.insert(host)
+    // MARK: - Intercept media responses → trigger WKDownload
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        if let mime = navigationResponse.response.mimeType {
+            let mediaTypes = ["video/", "audio/", "image/gif", "application/octet-stream"]
+            if mediaTypes.contains(where: { mime.hasPrefix($0) }) && !navigationResponse.isForMainFrame {
+                // Detected media response - emit to UI
+                if let url = navigationResponse.response.url {
+                    let type: DetectedMedia.MediaType = mime.contains("gif") ? .gif : mime.contains("video") ? .mp4 : .mp4
+                    emitMedia(url: url, type: type, quality: "Direct")
+                }
+            }
         }
-        let ext = url.pathExtension.lowercased()
-        if ["mp4","m4v","mov","webm"].contains(ext) { emitMedia(url: url, type: .mp4, quality: "Direct") }
-        else if ext == "m3u8" { emitMedia(url: url, type: .hls, quality: "Auto") }
-        return .allow
+        if let url = navigationResponse.response.url {
+            let ext = url.pathExtension.lowercased()
+            if ["mp4","m4v","mov","webm","mp3","m4a"].contains(ext) {
+                decisionHandler(.download)
+                return
+            }
+        }
+        decisionHandler(.allow)
     }
 
+    // MARK: - WKDownloadDelegate (iOS 14.5+)
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        download.delegate = self
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        download.delegate = self
+    }
+
+    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String) async -> URL? {
+        pendingDownloadFilename = suggestedFilename
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Downloads", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dest = dir.appendingPathComponent(suggestedFilename)
+        if FileManager.default.fileExists(atPath: dest.path) { try? FileManager.default.removeItem(at: dest) }
+        return dest
+    }
+
+    func downloadDidFinish(_ download: WKDownload) {
+        // Notify user download completed
+        NotificationCenter.default.post(name: .downloadCompleted, object: pendingDownloadFilename)
+    }
+
+    func download(_ download: WKDownload, didFailWithError error: any Error, resumeData: Data?) {
+        NotificationCenter.default.post(name: .downloadFailed, object: error.localizedDescription)
+    }
+
+    // MARK: - New window (target=_blank)
     func webView(_ w: WKWebView, createWebViewWith c: WKWebViewConfiguration, for a: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if a.targetFrame == nil { w.load(a.request) }; return nil
     }
 
-    // === LONG-PRESS CONTEXT MENU (no Face ID, no photo save) ===
+    // MARK: - Context Menu (long-press)
     func webView(_ webView: WKWebView, contextMenuConfigurationFor elementInfo: WKContextMenuElementInfo) async -> UIContextMenuConfiguration? {
         guard let linkURL = elementInfo.linkURL else { return nil }
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
@@ -54,8 +98,10 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             let ext = linkURL.pathExtension.lowercased()
             if ["mp4","m4v","mov","webm","gif","m3u8","png","jpg","jpeg","webp"].contains(ext) {
                 actions.append(UIAction(title: "다운로드", image: UIImage(systemName: "arrow.down.circle.fill")) { [weak self] _ in
-                    let type: DetectedMedia.MediaType = ext == "gif" ? .gif : ext == "m3u8" ? .hls : .mp4
-                    self?.emitMedia(url: linkURL, type: type, quality: "Direct")
+                    self?.emitMedia(url: linkURL, type: ext == "gif" ? .gif : .mp4, quality: "Direct")
+                })
+                actions.append(UIAction(title: "사진 앱에 저장", image: UIImage(systemName: "photo.badge.arrow.down")) { _ in
+                    Self.saveURLToPhotos(linkURL)
                 })
             }
             actions.append(UIAction(title: "링크 복사", image: UIImage(systemName: "doc.on.doc")) { _ in
@@ -65,7 +111,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         }
     }
 
-    // === JS MESSAGE HANDLER ===
+    // MARK: - JS Bridge
     func userContentController(_ uc: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let dict = message.body as? [String: Any] else { return }
         switch message.name {
@@ -108,6 +154,22 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             title: url.deletingPathExtension().lastPathComponent, referer: tab.url?.absoluteString ?? "", thumbnail: nil, estimatedSize: nil)
         if !tab.detectedMedia.contains(media) { tab.detectedMedia.append(media); onMediaDetected(media) }
     }
+
+    // MARK: - Save to Photos (with proper permission check)
+    static func saveURLToPhotos(_ url: URL) {
+        let ext = url.pathExtension.lowercased()
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data, error == nil else { return }
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                guard status == .authorized || status == .limited else { return }
+                PHPhotoLibrary.shared().performChanges {
+                    let req = PHAssetCreationRequest.forAsset()
+                    let isVideo = ["mp4","m4v","mov","webm"].contains(ext)
+                    req.addResource(with: isVideo ? .video : .photo, data: data, options: nil)
+                }
+            }
+        }.resume()
+    }
 }
 
 // MARK: - Element Hider Store
@@ -148,54 +210,40 @@ enum WebViewConfigurator {
 
     static let injectionJS = """
     (function(){
-    // ===== ALOHA-STYLE DOWNLOAD BUTTON ON VIDEOS =====
-    function addDLBtn(v){
-        if(v.dataset.gsBtn)return; v.dataset.gsBtn='1';
-        var w=v.parentElement; if(!w)return;
+    // ===== ALOHA DOWNLOAD BUTTON =====
+    function addDL(v){
+        if(v.dataset.gsBtn)return;v.dataset.gsBtn='1';
+        var w=v.parentElement;if(!w)return;
         if(getComputedStyle(w).position==='static')w.style.position='relative';
         var b=document.createElement('div');
-        b.innerHTML='<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 19h14" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-        b.style.cssText='position:absolute;top:8px;right:8px;z-index:999999;background:rgba(0,180,140,0.92);border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.4);';
-        b.addEventListener('click',function(e){
-            e.stopPropagation();e.preventDefault();
+        b.innerHTML='<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 19h14" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        b.style.cssText='position:absolute;top:8px;right:8px;z-index:999999;background:rgba(0,180,140,0.92);border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.4);pointer-events:auto;';
+        b.onclick=function(e){e.stopPropagation();e.preventDefault();
             var src=v.currentSrc||v.src||'';
             v.querySelectorAll('source').forEach(function(s){if(!src&&s.src)src=s.src;});
-            if(src){
-                window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p'});
-                b.innerHTML='<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-                setTimeout(function(){b.innerHTML='<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 19h14" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';},2000);
-            }
-        });
-        b.addEventListener('touchend',function(e){e.stopPropagation();});
+            if(src){window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p'});
+            b.innerHTML='<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            setTimeout(function(){b.innerHTML='<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 19h14" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';},2000);}};
+        b.ontouchend=function(e){e.stopPropagation();};
         w.appendChild(b);
-        v.addEventListener('webkitbeginfullscreen',function(){
-            var src=v.currentSrc||v.src;
-            if(src)window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p'});
-        });
+        v.addEventListener('webkitbeginfullscreen',function(){var src=v.currentSrc||v.src;if(src)window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p'});});
     }
 
-    // ===== MEDIA SCANNER =====
     function scan(){
-        document.querySelectorAll('video').forEach(function(v){ addDLBtn(v);
-            var s=[];
-            if(v.src)s.push({url:v.src,type:v.src.includes('.m3u8')?'hls':'mp4',label:'default'});
+        document.querySelectorAll('video').forEach(addDL);
+        document.querySelectorAll('video').forEach(function(v){
+            var s=[];if(v.src)s.push({url:v.src,type:v.src.includes('.m3u8')?'hls':'mp4',label:'default'});
             v.querySelectorAll('source').forEach(function(src){if(src.src)s.push({url:src.src,type:src.src.includes('.m3u8')?'hls':'mp4',label:src.getAttribute('label')||'default'});});
             if(s.length)window.webkit.messageHandlers.mediaFound.postMessage({sources:s,title:document.title,referer:location.href,thumb:v.poster||null});
         });
-        document.querySelectorAll('img').forEach(function(img){
-            var src=img.src||'';
-            if(src.match(/\\.gif(\\?|$)/i))
-                window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:src,type:'gif',label:'GIF'}],title:img.alt||'GIF',referer:location.href,thumb:null});
+        document.querySelectorAll('img').forEach(function(img){var src=img.src||'';
+            if(src.match(/\\.gif(\\?|$)/i))window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:src,type:'gif',label:'GIF'}],title:img.alt||'GIF',referer:location.href,thumb:null});
         });
-        if(typeof jwplayer!=='undefined'){
-            document.querySelectorAll('[id]').forEach(function(el){try{var p=jwplayer(el.id);if(!p||!p.getState)return;
-                function ex(){var it=p.getPlaylistItem()||{};var ss=(it.sources||[]).map(function(s){return{url:s.file,type:s.file&&s.file.includes('.m3u8')?'hls':'mp4',label:s.label||'default'};});
-                if(ss.length)window.webkit.messageHandlers.mediaFound.postMessage({sources:ss,title:it.title||document.title,referer:location.href,thumb:it.image||null});}
-                p.on('ready',ex);p.on('playlistItem',ex);if(p.getState()!=='idle')ex();}catch(e){}});
-        }
+        if(typeof jwplayer!=='undefined'){document.querySelectorAll('[id]').forEach(function(el){try{var p=jwplayer(el.id);if(!p||!p.getState)return;
+            function ex(){var it=p.getPlaylistItem()||{};var ss=(it.sources||[]).map(function(s){return{url:s.file,type:s.file&&s.file.includes('.m3u8')?'hls':'mp4',label:s.label||'default'};});
+            if(ss.length)window.webkit.messageHandlers.mediaFound.postMessage({sources:ss,title:it.title||document.title,referer:location.href,thumb:it.image||null});}
+            p.on('ready',ex);p.on('playlistItem',ex);if(p.getState()!=='idle')ex();}catch(e){}});}
     }
-
-    // XHR/fetch intercept
     var _xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){if(typeof u==='string'&&u.includes('.m3u8'))window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:u,type:'hls',label:'HLS'}],title:document.title,referer:location.href,thumb:null});return _xo.apply(this,arguments);};
     var _f=window.fetch;window.fetch=function(i){var u=typeof i==='string'?i:(i&&i.url?i.url:'');if(u.includes('.m3u8'))window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:u,type:'hls',label:'HLS'}],title:document.title,referer:location.href,thumb:null});return _f.apply(this,arguments);};
     var _co=URL.createObjectURL.bind(URL);URL.createObjectURL=function(b){var u=_co(b);if(b&&b.type&&b.type.startsWith('video/')){var r=new FileReader();r.onload=function(e){window.webkit.messageHandlers.blobCapture.postMessage({data:e.target.result,mimeType:b.type});};r.readAsDataURL(b);}return u;};
@@ -219,6 +267,9 @@ enum WebViewConfigurator {
     """
 }
 
+// MARK: - Notifications
 extension Notification.Name {
     static let openInNewTab = Notification.Name("openInNewTab")
+    static let downloadCompleted = Notification.Name("downloadCompleted")
+    static let downloadFailed = Notification.Name("downloadFailed")
 }

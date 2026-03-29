@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key>
-    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <string>ko</string>
     <key>CFBundleDisplayName</key>
     <string>GhostStream</string>
     <key>CFBundleExecutable</key>
@@ -29,7 +29,7 @@
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>
-        <true/>
+        <false/>
         <key>UISceneConfigurations</key>
         <dict/>
     </dict>
@@ -52,7 +52,11 @@
         <string>processing</string>
     </array>
     <key>NSFaceIDUsageDescription</key>
-    <string>보관함 잠금 해제에 Face ID를 사용합니다.</string>
+    <string>앱 잠금 기능을 위해 Face ID를 사용합니다.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>다운로드한 사진과 영상을 사진 앱에 저장하기 위해 접근 권한이 필요합니다.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>다운로드한 미디어를 사진 앱에 추가합니다.</string>
     <key>NSUserTrackingUsageDescription</key>
     <string>GhostStream은 사용자를 추적하지 않습니다.</string>
     <key>NSAppTransportSecurity</key>
@@ -62,7 +66,6 @@
     </dict>
     <key>BGTaskSchedulerPermittedIdentifiers</key>
     <array>
-        <string>com.ghoststream.blocklist.update</string>
         <string>com.ghoststream.media.bg</string>
         <string>com.ghoststream.hls.bg</string>
     </array>

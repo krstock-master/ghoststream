@@ -1,6 +1,4 @@
 // Browser/BrowserWebView.swift
-// GhostStream - UIViewRepresentable wrapper for WKWebView
-
 import SwiftUI
 import WebKit
 
@@ -15,81 +13,51 @@ struct BrowserWebView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> WKWebView {
-        let config = WebViewConfigurator.makeConfiguration(
-            for: tab,
-            privacyEngine: privacyEngine,
-            coordinator: context.coordinator
-        )
-
+        let config = WebViewConfigurator.makeConfiguration(for: tab, privacyEngine: privacyEngine, coordinator: context.coordinator)
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
-        #if DEBUG
-        webView.isInspectable = true
-        #endif
-
-        // Custom user agent
         webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
-
-        // KVO for progress and title
         context.coordinator.observeWebView(webView)
-
-        DispatchQueue.main.async {
-            webViewRef = webView
-        }
-
-        // Load initial URL or new tab page
-        if let url = tab.url {
-            webView.load(URLRequest(url: url))
-        }
-
+        DispatchQueue.main.async { webViewRef = webView }
+        if let url = tab.url { webView.load(URLRequest(url: url)) }
         return webView
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        // Navigation handled via commands, not re-render
-    }
+    func updateUIView(_ webView: WKWebView, context: Context) {}
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: WebViewCoordinator) {
         coordinator.removeObservers(from: webView)
     }
 }
 
-// MARK: - KVO Observation Extension
+// MARK: - KVO
 extension WebViewCoordinator {
-    private static var progressObservation: UInt8 = 0
-    private static var titleObservation: UInt8 = 0
+    private static var kvoKey: UInt8 = 0
 
     func observeWebView(_ webView: WKWebView) {
-        let progressObs = webView.observe(\.estimatedProgress, options: .new) { [weak self] wv, _ in
-            DispatchQueue.main.async {
-                self?.tab.loadProgress = wv.estimatedProgress
+        let obs = [
+            webView.observe(\.estimatedProgress) { [weak self] wv, _ in
+                DispatchQueue.main.async { self?.tab.loadProgress = wv.estimatedProgress }
+            },
+            webView.observe(\.title) { [weak self] wv, _ in
+                DispatchQueue.main.async { self?.tab.title = wv.title ?? "" }
+            },
+            webView.observe(\.url) { [weak self] wv, _ in
+                DispatchQueue.main.async {
+                    self?.tab.url = wv.url; self?.tab.isSecure = wv.url?.scheme == "https"
+                    self?.tab.canGoBack = wv.canGoBack; self?.tab.canGoForward = wv.canGoForward
+                }
+            },
+            webView.observe(\.isLoading) { [weak self] wv, _ in
+                DispatchQueue.main.async { self?.tab.isLoading = wv.isLoading }
             }
-        }
-        let titleObs = webView.observe(\.title, options: .new) { [weak self] wv, _ in
-            DispatchQueue.main.async {
-                self?.tab.title = wv.title ?? ""
-            }
-        }
-        let urlObs = webView.observe(\.url, options: .new) { [weak self] wv, _ in
-            DispatchQueue.main.async {
-                self?.tab.url = wv.url
-                self?.tab.isSecure = wv.url?.scheme == "https"
-                self?.tab.canGoBack = wv.canGoBack
-                self?.tab.canGoForward = wv.canGoForward
-            }
-        }
-        let loadingObs = webView.observe(\.isLoading, options: .new) { [weak self] wv, _ in
-            DispatchQueue.main.async {
-                self?.tab.isLoading = wv.isLoading
-            }
-        }
-
-        objc_setAssociatedObject(self, &Self.progressObservation, [progressObs, titleObs, urlObs, loadingObs], .OBJC_ASSOCIATION_RETAIN)
+        ]
+        objc_setAssociatedObject(self, &Self.kvoKey, obs, .OBJC_ASSOCIATION_RETAIN)
     }
 
     func removeObservers(from webView: WKWebView) {
-        objc_setAssociatedObject(self, &Self.progressObservation, nil, .OBJC_ASSOCIATION_RETAIN)
+        objc_setAssociatedObject(self, &Self.kvoKey, nil, .OBJC_ASSOCIATION_RETAIN)
     }
 }
