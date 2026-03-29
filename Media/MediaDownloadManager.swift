@@ -231,13 +231,29 @@ extension MediaDownloadManager: AVAssetDownloadDelegate {
     func urlSession(_ session: URLSession, assetDownloadTask: AVAssetDownloadTask,
                     didFinishDownloadingTo location: URL) {
         guard let dl = find(byTaskID: assetDownloadTask.taskIdentifier) else { return }
-        dl.localURL = location
+
+        // Move .movpkg to Documents/Downloads for permanent storage
+        let destDir = Self.downloadDirectory
+        let filename = "\(dl.media.title.prefix(40))_\(Int(Date().timeIntervalSince1970)).movpkg"
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+        let dest = destDir.appendingPathComponent(filename)
+
+        do {
+            if FileManager.default.fileExists(atPath: dest.path) {
+                try FileManager.default.removeItem(at: dest)
+            }
+            try FileManager.default.moveItem(at: location, to: dest)
+            dl.localURL = dest
+        } catch {
+            // Fallback: use original location
+            dl.localURL = location
+        }
+
         dl.state = .completed
         dl.progress = 1.0
-        completedDownloads.insert(dl, at: 0)
-
-        if dl.saveToVault {
-            Task { await moveToVault(dl) }
+        DispatchQueue.main.async {
+            self.completedDownloads.insert(dl, at: 0)
         }
     }
 

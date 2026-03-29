@@ -19,7 +19,7 @@ struct BrowserWebView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
-        webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+        // Use default WKWebView UA (identical to Safari, passes Cloudflare)
         context.coordinator.downloadManager = downloadManager
         context.coordinator.observeWebView(webView)
         DispatchQueue.main.async { webViewRef = webView }

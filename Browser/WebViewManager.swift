@@ -293,6 +293,19 @@ enum WebViewConfigurator {
 
     new MutationObserver(scan).observe(document.body||document.documentElement,{childList:true,subtree:true});
     setTimeout(scan,800);setTimeout(scan,2500);setTimeout(scan,5000);
+    // Periodic re-scan for dynamically loaded videos (YouTube, TikTok etc)
+    setInterval(function(){
+        document.querySelectorAll('video').forEach(function(v){
+            if(!v.dataset.gsBtn)addDL(v);
+            // If video is playing and has src, emit for snackbar
+            if(!v.paused&&!v.dataset.gsEmitted){
+                v.dataset.gsEmitted='1';
+                var src=v.currentSrc||v.src||'';
+                v.querySelectorAll('source').forEach(function(s){if(!src&&s.src)src=s.src;});
+                if(src)window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:src,type:src.includes('.m3u8')?'hls':'mp4',label:(v.videoHeight||'Auto')+'p'}],title:document.title,referer:location.href,thumb:v.poster||null});
+            }
+        });
+    },3000);
     })();
     """
 }

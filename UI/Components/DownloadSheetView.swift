@@ -220,7 +220,10 @@ struct DownloadsManagerView: View {
     }
 
     private func openFile(_ url: URL, type: DetectedMedia.MediaType) {
-        if type == .mp4 || type == .hls || type == .blob {
+        let ext = url.pathExtension.lowercased()
+        let isPlayable = type == .mp4 || type == .hls || type == .blob
+            || ["mp4","m4v","mov","webm","movpkg"].contains(ext)
+        if isPlayable {
             playerURL = url; showPlayer = true
         } else {
             if let s = UIApplication.shared.connectedScenes.first as? UIWindowScene,
