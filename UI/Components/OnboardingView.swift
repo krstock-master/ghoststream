@@ -33,8 +33,8 @@ struct OnboardingView: View {
 
             Image(systemName: "ghost")
                 .font(.system(size: 72))
-                .foregroundStyle(GhostTheme.accent)
-                .shadow(color: GhostTheme.accent.opacity(0.4), radius: 20)
+                .foregroundStyle(.teal)
+                .shadow(color: .teal.opacity(0.4), radius: 20)
 
             VStack(spacing: 8) {
                 Text("GhostStream")
@@ -64,7 +64,7 @@ struct OnboardingView: View {
         VStack(spacing: 24) {
             Spacer()
 
-            featureIcon("shield.checkered", color: GhostTheme.accent)
+            featureIcon("shield.checkered", color: .teal)
 
             Text("Brave급 프라이버시")
                 .font(.title2.bold())
@@ -90,7 +90,7 @@ struct OnboardingView: View {
         VStack(spacing: 24) {
             Spacer()
 
-            featureIcon("arrow.down.circle.fill", color: GhostTheme.accentAlt)
+            featureIcon("arrow.down.circle.fill", color: .tealAlt)
 
             Text("모든 미디어 다운로드")
                 .font(.title2.bold())
@@ -116,7 +116,7 @@ struct OnboardingView: View {
         VStack(spacing: 24) {
             Spacer()
 
-            featureIcon("exclamationmark.shield.fill", color: GhostTheme.warning)
+            featureIcon("exclamationmark.shield.fill", color: .orange)
 
             Text("사용 전 주의사항")
                 .font(.title2.bold())
@@ -136,7 +136,7 @@ struct OnboardingView: View {
                     .font(.subheadline)
                     .foregroundStyle(.white)
             }
-            .tint(GhostTheme.accent)
+            .tint(.teal)
             .padding(.horizontal, 24)
             .padding(16)
             .glass()
@@ -150,7 +150,7 @@ struct OnboardingView: View {
                     .foregroundStyle(.black)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
-                    .background(agreedToTerms ? GhostTheme.accent : .gray.opacity(0.3), in: RoundedRectangle(cornerRadius: 14))
+                    .background(agreedToTerms ? .teal : .gray.opacity(0.3), in: RoundedRectangle(cornerRadius: 14))
             }
             .disabled(!agreedToTerms)
             .padding(.horizontal, 24)
@@ -175,7 +175,7 @@ struct OnboardingView: View {
         HStack(spacing: 14) {
             Image(systemName: icon)
                 .font(.body)
-                .foregroundStyle(GhostTheme.accent)
+                .foregroundStyle(.teal)
                 .frame(width: 24)
             Text(text)
                 .font(.subheadline)
@@ -200,7 +200,7 @@ struct OnboardingView: View {
                 .foregroundStyle(.black)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
-                .background(GhostTheme.accent, in: RoundedRectangle(cornerRadius: 14))
+                .background(.teal, in: RoundedRectangle(cornerRadius: 14))
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 40)

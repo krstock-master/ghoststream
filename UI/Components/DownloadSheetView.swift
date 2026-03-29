@@ -26,9 +26,9 @@ struct DownloadSheetView: View {
                     }
                 }
             }
-            .background(GhostTheme.bg)
+            .background(Color(.systemBackground))
             .navigationTitle("다운로드").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("닫기") { dismiss() }.foregroundStyle(GhostTheme.accent) } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("닫기") { dismiss() }.foregroundStyle(.teal) } }
         }
         .presentationDetents([.medium, .large])
     }
@@ -39,7 +39,7 @@ struct DownloadSheetView: View {
             VStack(spacing: 16) {
                 HStack(spacing: 12) {
                     Image(systemName: media.type == .gif ? "photo.fill" : "film.fill")
-                        .font(.title2).foregroundStyle(GhostTheme.accent)
+                        .font(.title2).foregroundStyle(.teal)
                         .frame(width: 50, height: 50).glass(12)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(media.title).font(.headline).foregroundStyle(.white).lineLimit(2)
@@ -55,12 +55,12 @@ struct DownloadSheetView: View {
                             Button { selectedQuality = q } label: {
                                 HStack {
                                     Image(systemName: selectedQuality == q ? "largecircle.fill.circle" : "circle")
-                                        .foregroundStyle(selectedQuality == q ? GhostTheme.accent : Color.gray.opacity(0.5))
+                                        .foregroundStyle(selectedQuality == q ? .teal : Color.gray.opacity(0.5))
                                     Text(q).foregroundStyle(.white)
                                     if q == "720p" {
-                                        Text("권장").font(.caption2).foregroundStyle(GhostTheme.accent)
+                                        Text("권장").font(.caption2).foregroundStyle(.teal)
                                             .padding(.horizontal, 6).padding(.vertical, 2)
-                                            .background(GhostTheme.accent.opacity(0.15), in: Capsule())
+                                            .background(.teal.opacity(0.15), in: Capsule())
                                     }
                                     Spacer()
                                 }.padding(12).glass()
@@ -81,7 +81,7 @@ struct DownloadSheetView: View {
                 } label: {
                     Text("저장 시작").font(.headline).foregroundStyle(.black)
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
-                        .background(GhostTheme.accent, in: RoundedRectangle(cornerRadius: 12))
+                        .background(.teal, in: RoundedRectangle(cornerRadius: 12))
                 }
             }.padding()
         } else {
@@ -97,7 +97,7 @@ struct DownloadSheetView: View {
     private func saveLoc(_ text: String, _ selected: Bool) -> some View {
         HStack {
             Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                .foregroundStyle(selected ? GhostTheme.accent : Color.gray.opacity(0.5))
+                .foregroundStyle(selected ? .teal : Color.gray.opacity(0.5))
             Text(text).foregroundStyle(.white).font(.subheadline)
             Spacer()
         }.padding(12).glass()
@@ -123,28 +123,28 @@ struct DownloadSheetView: View {
                 ForEach(downloadManager.completedDownloads) { dl in
                     VStack(spacing: 8) {
                         HStack(spacing: 12) {
-                            Image(systemName: "checkmark.circle.fill").foregroundStyle(GhostTheme.success)
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(dl.media.title).font(.subheadline).foregroundStyle(.white).lineLimit(1)
                                 Text(dl.media.type.rawValue).font(.caption).foregroundStyle(Color.gray)
                             }
                             Spacer()
                             if dl.saveToVault {
-                                Image(systemName: "lock.fill").font(.caption).foregroundStyle(GhostTheme.accentAlt)
+                                Image(systemName: "lock.fill").font(.caption).foregroundStyle(.tealAlt)
                             }
                         }
                         if let url = dl.localURL {
                             HStack(spacing: 12) {
                                 ShareLink(item: url) {
                                     Label("공유", systemImage: "square.and.arrow.up")
-                                        .font(.caption).foregroundStyle(GhostTheme.accent)
+                                        .font(.caption).foregroundStyle(.teal)
                                 }
                                 if !dl.saveToVault {
                                     Button {
                                         openFile(url)
                                     } label: {
                                         Label("열기", systemImage: "play.circle")
-                                            .font(.caption).foregroundStyle(GhostTheme.accent)
+                                            .font(.caption).foregroundStyle(.teal)
                                     }
                                 }
                                 Spacer()
@@ -177,25 +177,25 @@ struct DLRow: View {
                         .font(.caption).foregroundStyle(Color.gray)
                 }
                 Spacer()
-                Text(download.formattedSpeed).font(.caption2.monospacedDigit()).foregroundStyle(GhostTheme.accent)
+                Text(download.formattedSpeed).font(.caption2.monospacedDigit()).foregroundStyle(.teal)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 3).fill(.white.opacity(0.1)).frame(height: 4)
-                    RoundedRectangle(cornerRadius: 3).fill(GhostTheme.gradient)
+                    RoundedRectangle(cornerRadius: 3).fill(Color.teal)
                         .frame(width: geo.size.width * download.progress, height: 4)
                 }
             }.frame(height: 4)
             HStack(spacing: 12) {
                 if download.state == .downloading {
-                    Button("일시정지") { manager.pause(download) }.font(.caption).foregroundStyle(GhostTheme.warning)
-                    Button("취소") { manager.cancel(download) }.font(.caption).foregroundStyle(GhostTheme.danger)
+                    Button("일시정지") { manager.pause(download) }.font(.caption).foregroundStyle(.orange)
+                    Button("취소") { manager.cancel(download) }.font(.caption).foregroundStyle(.red)
                 } else if download.state == .paused {
-                    Button("재개") { manager.resume(download) }.font(.caption).foregroundStyle(GhostTheme.accent)
+                    Button("재개") { manager.resume(download) }.font(.caption).foregroundStyle(.teal)
                 } else if download.state == .failed {
-                    Text(download.error ?? "오류").font(.caption).foregroundStyle(GhostTheme.danger)
+                    Text(download.error ?? "오류").font(.caption).foregroundStyle(.red)
                     Spacer()
-                    Button("재시도") { manager.retry(download) }.font(.caption).foregroundStyle(GhostTheme.accent)
+                    Button("재시도") { manager.retry(download) }.font(.caption).foregroundStyle(.teal)
                 }
                 Spacer()
             }

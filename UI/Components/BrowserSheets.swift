@@ -12,7 +12,7 @@ struct PrivacyReportSheet: View {
                     ZStack {
                         Circle().stroke(.white.opacity(0.1), lineWidth: 8).frame(width: 100, height: 100)
                         Circle().trim(from: 0, to: Double(report.score) / 100)
-                            .stroke(report.score >= 70 ? GhostTheme.success : report.score >= 40 ? GhostTheme.warning : GhostTheme.danger,
+                            .stroke(report.score >= 70 ? .green : report.score >= 40 ? .orange : .red,
                                     style: StrokeStyle(lineWidth: 8, lineCap: .round))
                             .frame(width: 100, height: 100).rotationEffect(.degrees(-90))
                         VStack(spacing: 2) {
@@ -28,7 +28,7 @@ struct PrivacyReportSheet: View {
                         row("제3자 도메인", "\(report.thirdPartyDomains.count)개")
                     }.clipShape(RoundedRectangle(cornerRadius: 12))
                     HStack(spacing: 8) {
-                        Image(systemName: "lock.circle.fill").foregroundStyle(GhostTheme.success)
+                        Image(systemName: "lock.circle.fill").foregroundStyle(.green)
                         VStack(alignment: .leading) {
                             Text("쿠키 격리됨").font(.subheadline.weight(.medium)).foregroundStyle(.white)
                             Text("이 탭의 쿠키는 다른 탭에 영향 없음").font(.caption).foregroundStyle(Color.gray)
@@ -37,9 +37,9 @@ struct PrivacyReportSheet: View {
                     }.padding().glass()
                 }.padding()
             }
-            .background(GhostTheme.bg)
+            .background(Color(.systemBackground))
             .navigationTitle("프라이버시 리포트").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("닫기") { dismiss() }.foregroundStyle(GhostTheme.accent) } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("닫기") { dismiss() }.foregroundStyle(.teal) } }
         }
     }
     private func row(_ k: String, _ v: String) -> some View {
@@ -62,12 +62,12 @@ struct TabGridView: View {
                         VStack(spacing: 0) {
                             ZStack(alignment: .topTrailing) {
                                 RoundedRectangle(cornerRadius: 10)
-                                    .fill(tab.isPrivate ? GhostTheme.accentAlt.opacity(0.1) : .white.opacity(0.05))
+                                    .fill(tab.isPrivate ? .tealAlt.opacity(0.1) : .white.opacity(0.05))
                                     .frame(height: 120)
                                     .overlay {
                                         VStack {
                                             Image(systemName: tab.isPrivate ? "lock.fill" : "globe").font(.title2)
-                                                .foregroundStyle(tab.isPrivate ? GhostTheme.accentAlt : Color.gray)
+                                                .foregroundStyle(tab.isPrivate ? .tealAlt : Color.gray)
                                             Text(tab.displayTitle).font(.caption2).foregroundStyle(Color.gray).lineLimit(1).padding(.horizontal, 4)
                                         }
                                     }
@@ -75,25 +75,25 @@ struct TabGridView: View {
                                     Image(systemName: "xmark.circle.fill").font(.body).foregroundStyle(Color.gray)
                                 }.padding(6)
                             }
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(tab.id == tabManager.activeTabID ? GhostTheme.accent : .clear, lineWidth: 2))
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(tab.id == tabManager.activeTabID ? .teal : .clear, lineWidth: 2))
                         }
                         .onTapGesture { tabManager.switchTo(tab); dismiss() }
                     }
                 }.padding()
             }
-            .background(GhostTheme.bg)
+            .background(Color(.systemBackground))
             .navigationTitle("탭 (\(tabManager.tabs.count))").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("모두 닫기") { tabManager.closeAllTabs(); dismiss() }.font(.caption).foregroundStyle(GhostTheme.danger)
+                    Button("모두 닫기") { tabManager.closeAllTabs(); dismiss() }.font(.caption).foregroundStyle(.red)
                 }
-                ToolbarItem(placement: .topBarTrailing) { Button("완료") { dismiss() }.foregroundStyle(GhostTheme.accent) }
+                ToolbarItem(placement: .topBarTrailing) { Button("완료") { dismiss() }.foregroundStyle(.teal) }
                 ToolbarItem(placement: .bottomBar) {
                     HStack {
                         Button { tabManager.newTab(); dismiss() } label: { Label("새 탭", systemImage: "plus") }
                         Spacer()
                         Button { tabManager.newTab(isPrivate: true); dismiss() } label: { Label("프라이빗", systemImage: "lock") }
-                    }.foregroundStyle(GhostTheme.accent)
+                    }.foregroundStyle(.teal)
                 }
             }
         }
