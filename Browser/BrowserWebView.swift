@@ -5,6 +5,7 @@ import WebKit
 struct BrowserWebView: UIViewRepresentable {
     let tab: Tab
     let privacyEngine: PrivacyEngine
+    let downloadManager: MediaDownloadManager
     let onMediaDetected: (DetectedMedia) -> Void
     @Binding var webViewRef: WKWebView?
 
@@ -19,6 +20,7 @@ struct BrowserWebView: UIViewRepresentable {
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+        context.coordinator.downloadManager = downloadManager
         context.coordinator.observeWebView(webView)
         DispatchQueue.main.async { webViewRef = webView }
         if let url = tab.url { webView.load(URLRequest(url: url)) }

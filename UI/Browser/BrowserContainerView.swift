@@ -44,6 +44,17 @@ struct BrowserContainerView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openInNewTab)) { n in
             if let url = n.object as? URL { tabManager.newTab(url: url) }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .startImmediateDownload)) { n in
+            if let media = n.object as? DetectedMedia {
+                downloadManager.download(media: media, saveToVault: false)
+                latestMedia = media
+                withAnimation { showMediaSnackbar = true }
+                Task { try? await Task.sleep(for: .seconds(3)); withAnimation { showMediaSnackbar = false } }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .downloadCompleted)) { n in
+            // Toast notification
+        }
         .sheet(isPresented: $showDownloadSheet) { DownloadSheetView(media: latestMedia) }
         .sheet(isPresented: $showVault) { VaultView() }
         .sheet(isPresented: $showSettings) { SettingsView() }
@@ -146,7 +157,7 @@ struct BrowserContainerView: View {
             if tab.url == nil {
                 NewTabPage { navigateTo($0) }
             } else {
-                BrowserWebView(tab: tab, privacyEngine: privacyEngine,
+                BrowserWebView(tab: tab, privacyEngine: privacyEngine, downloadManager: downloadManager,
                     onMediaDetected: { media in
                         latestMedia = media
                         withAnimation { showMediaSnackbar = true }
@@ -157,20 +168,15 @@ struct BrowserContainerView: View {
     }
 
     private func snackbar(_ media: DetectedMedia) -> some View {
-        Button { showDownloadSheet = true } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "film.fill").foregroundStyle(.teal).font(.title3)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("미디어 감지됨").font(.subheadline.weight(.medium))
-                    Text("\(media.type.rawValue) · \(media.quality)").font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text("저장").font(.subheadline.weight(.semibold)).foregroundStyle(.teal)
-                    .padding(.horizontal, 14).padding(.vertical, 6)
-                    .background(Color.teal.opacity(0.15)).clipShape(Capsule())
-            }.padding(14)
-            .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 14))
-        }
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Text("다운로드 시작됨").font(.subheadline.weight(.medium))
+            Spacer()
+            Button { showDownloadSheet = true } label: {
+                Text("보기").font(.caption.weight(.semibold)).foregroundStyle(.teal)
+            }
+        }.padding(.horizontal, 16).padding(.vertical, 12)
+        .background(.ultraThinMaterial).clipShape(Capsule())
     }
 
     private var toolbar: some View {

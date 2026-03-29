@@ -9,6 +9,8 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     let onMediaDetected: (DetectedMedia) -> Void
     private var pendingDownloadFilename: String?
 
+    var downloadManager: MediaDownloadManager?
+
     init(tab: Tab, privacyEngine: PrivacyEngine, onMediaDetected: @escaping (DetectedMedia) -> Void) {
         self.tab = tab; self.privacyEngine = privacyEngine; self.onMediaDetected = onMediaDetected
     }
@@ -32,25 +34,30 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
     func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
 
-    // MARK: - Intercept media responses → trigger WKDownload
+    // MARK: - Intercept media responses → WKDownload
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        if let mime = navigationResponse.response.mimeType {
-            let mediaTypes = ["video/", "audio/", "image/gif", "application/octet-stream"]
-            if mediaTypes.contains(where: { mime.hasPrefix($0) }) && !navigationResponse.isForMainFrame {
-                // Detected media response - emit to UI
-                if let url = navigationResponse.response.url {
-                    let type: DetectedMedia.MediaType = mime.contains("gif") ? .gif : mime.contains("video") ? .mp4 : .mp4
-                    emitMedia(url: url, type: type, quality: "Direct")
-                }
-            }
+        let url = navigationResponse.response.url
+        let mime = navigationResponse.response.mimeType ?? ""
+        let ext = url?.pathExtension.lowercased() ?? ""
+        
+        // Direct video file navigation → trigger WKDownload
+        if ["mp4","m4v","mov","webm","mp3","m4a"].contains(ext) {
+            decisionHandler(.download)
+            return
         }
-        if let url = navigationResponse.response.url {
-            let ext = url.pathExtension.lowercased()
-            if ["mp4","m4v","mov","webm","mp3","m4a"].contains(ext) {
-                decisionHandler(.download)
-                return
-            }
+        
+        // Video MIME type in main frame → trigger WKDownload  
+        if (mime.hasPrefix("video/") || mime.hasPrefix("audio/")) && navigationResponse.isForMainFrame {
+            decisionHandler(.download)
+            return
         }
+        
+        // Non-main-frame media → emit for overlay button
+        if let url = url, (mime.hasPrefix("video/") || mime.contains("gif")) && !navigationResponse.isForMainFrame {
+            let type: DetectedMedia.MediaType = mime.contains("gif") ? .gif : .mp4
+            emitMedia(url: url, type: type, quality: "Direct")
+        }
+        
         decisionHandler(.allow)
     }
 
@@ -128,7 +135,14 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             }
         case "alohaDownload":
             guard let urlStr = dict["url"] as? String, let url = URL(string: urlStr) else { return }
-            emitMedia(url: url, type: urlStr.contains(".m3u8") ? .hls : .mp4, quality: (dict["quality"] as? String) ?? "Auto")
+            let type: DetectedMedia.MediaType = urlStr.contains(".m3u8") ? .hls : .mp4
+            let title = (dict["title"] as? String) ?? url.deletingPathExtension().lastPathComponent
+            let quality = (dict["quality"] as? String) ?? "Auto"
+            let media = DetectedMedia(url: url, type: type, quality: quality, title: title,
+                referer: tab.url?.absoluteString ?? "", thumbnail: nil, estimatedSize: nil)
+            // Immediately start download (Aloha-style: 1-tap download)
+            downloadManager?.download(media: media, saveToVault: false)
+            onMediaDetected(media)
         case "blobCapture":
             guard let dataURL = dict["data"] as? String, let mime = dict["mimeType"] as? String,
                   let range = dataURL.range(of: ","), let data = Data(base64Encoded: String(dataURL[range.upperBound...])) else { return }
@@ -270,6 +284,7 @@ enum WebViewConfigurator {
 // MARK: - Notifications
 extension Notification.Name {
     static let openInNewTab = Notification.Name("openInNewTab")
+    static let startImmediateDownload = Notification.Name("startImmediateDownload")
     static let downloadCompleted = Notification.Name("downloadCompleted")
     static let downloadFailed = Notification.Name("downloadFailed")
 }
