@@ -15,6 +15,9 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
     private var hlsSession: AVAssetDownloadURLSession?
     private var taskMap: [Int: String] = [:]
 
+    // Injected from BrowserWebView when a download starts (cookie forwarding)
+    var cookieStorage: HTTPCookieStorage = .shared
+
     init(vaultManager: VaultManager) {
         self.vaultManager = vaultManager
         super.init()
@@ -96,10 +99,13 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
     private func startDirectDownload(_ dl: MediaDownload) {
         var request = URLRequest(url: dl.media.url)
         request.setValue(dl.media.referer, forHTTPHeaderField: "Referer")
-        request.setValue(
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15",
-            forHTTPHeaderField: "User-Agent"
-        )
+        let ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+        request.setValue(ua, forHTTPHeaderField: "User-Agent")
+        // Forward cookies from WKWebView session
+        if let cookies = cookieStorage.cookies(for: dl.media.url), !cookies.isEmpty {
+            let cookieHeader = cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+            request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
+        }
 
         let task = urlSession?.downloadTask(with: request)
         dl.sessionTaskID = task?.taskIdentifier
@@ -114,11 +120,20 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
 
     private func startHLSDownload(_ dl: MediaDownload) {
         // First try AVAssetDownloadTask (native HLS download → .movpkg → auto-convert to .mp4)
-        let headers: [String: String] = [
+        let ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+        var cookieHeader = ""
+        if let cookies = cookieStorage.cookies(for: dl.media.url), !cookies.isEmpty {
+            cookieHeader = cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+        }
+        var headers: [String: String] = [
             "Referer": dl.media.referer,
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
-            "Origin": dl.media.referer.isEmpty ? "" : (URL(string: dl.media.referer)?.scheme ?? "https") + "://" + (URL(string: dl.media.referer)?.host ?? "")
+            "User-Agent": ua,
+            "Origin": dl.media.referer.isEmpty ? "" : {
+                guard let u = URL(string: dl.media.referer), let h = u.host else { return "" }
+                return (u.scheme ?? "https") + "://" + h
+            }()
         ]
+        if !cookieHeader.isEmpty { headers["Cookie"] = cookieHeader }
 
         let options: [String: Any] = ["AVURLAssetHTTPHeaderFieldsKey": headers]
         let asset = AVURLAsset(url: dl.media.url, options: options)
@@ -262,7 +277,17 @@ extension MediaDownloadManager: AVAssetDownloadDelegate {
     // MARK: HLS → MP4 export
     private func exportToMP4(from movpkgURL: URL, safeName: String, dl: MediaDownload) {
         let asset = AVURLAsset(url: movpkgURL)
-        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+        // Try low-overhead PassThrough first, then HighestQuality
+        let preset: String
+        let presets = AVAssetExportSession.exportPresets(compatibleWith: asset)
+        if presets.contains(AVAssetExportPresetPassthrough) {
+            preset = AVAssetExportPresetPassthrough
+        } else if presets.contains(AVAssetExportPresetHighestQuality) {
+            preset = AVAssetExportPresetHighestQuality
+        } else {
+            preset = AVAssetExportPresetMediumQuality
+        }
+        guard let exportSession = AVAssetExportSession(asset: asset, presetName: preset) else {
             // AVAssetExportSession unavailable – keep .movpkg as-is
             dl.localURL = movpkgURL
             dl.hlsConversionStatus = "MP4 변환 불가 (movpkg로 저장)"

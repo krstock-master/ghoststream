@@ -19,9 +19,10 @@ struct BrowserWebView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
-        // Use default WKWebView UA (identical to Safari, passes Cloudflare)
         context.coordinator.downloadManager = downloadManager
         context.coordinator.observeWebView(webView)
+        // Forward WKWebView cookies → downloadManager for authenticated HLS streams
+        context.coordinator.webView = webView
         DispatchQueue.main.async { webViewRef = webView }
         if let url = tab.url { webView.load(URLRequest(url: url)) }
         return webView

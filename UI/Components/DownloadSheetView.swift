@@ -1,6 +1,7 @@
 // UI/Components/DownloadsManagerView.swift
 import SwiftUI
 import AVKit
+import AVFoundation
 import Photos
 
 struct DownloadsManagerView: View {
@@ -83,7 +84,15 @@ struct DownloadsManagerView: View {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(dl.media.title).font(.subheadline).lineLimit(1)
-                        Text(dl.media.type.rawValue).font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Text(dl.media.type.rawValue).font(.caption).foregroundStyle(.secondary)
+                            if let status = dl.hlsConversionStatus {
+                                Text("·").font(.caption).foregroundStyle(.secondary)
+                                Text(status.contains("완료") ? "MP4" : "movpkg")
+                                    .font(.caption)
+                                    .foregroundStyle(status.contains("완료") ? .green : .orange)
+                            }
+                        }
                     }
                     Spacer()
                     if let url = dl.localURL {
@@ -231,7 +240,20 @@ struct DownloadsManagerView: View {
         let isPlayable = type == .mp4 || type == .hls || type == .blob
             || ["mp4","m4v","mov","webm","movpkg"].contains(ext)
         if isPlayable {
-            playerURL = url; showPlayer = true
+            // movpkg: use AVPlayer directly (iOS can play .movpkg natively)
+            // mp4/mov: direct play
+            // If file doesn't exist (export failed), try the download folder fallback
+            let fm = FileManager.default
+            if fm.fileExists(atPath: url.path) {
+                playerURL = url; showPlayer = true
+            } else {
+                // File missing - try to find any matching file in Downloads
+                let dir = MediaDownloadManager.downloadDirectory
+                if let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil),
+                   let match = files.first(where: { $0.lastPathComponent.contains(url.deletingPathExtension().lastPathComponent.prefix(20)) }) {
+                    playerURL = match; showPlayer = true
+                }
+            }
         } else {
             if let s = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                let r = s.windows.first?.rootViewController {
@@ -241,14 +263,33 @@ struct DownloadsManagerView: View {
     }
 
     private func saveToGallery(url: URL, type: DetectedMedia.MediaType) {
+        let ext = url.pathExtension.lowercased()
+        let isVideo = [DetectedMedia.MediaType.mp4, .hls, .blob, .webm].contains(type)
+            || ["mp4","m4v","mov","webm","movpkg"].contains(ext)
+
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else { return }
-            PHPhotoLibrary.shared().performChanges {
-                let isVideo = [DetectedMedia.MediaType.mp4, .hls, .blob].contains(type) || ["mp4","m4v","mov","webm"].contains(url.pathExtension.lowercased())
-                if isVideo {
-                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
-                } else {
-                    PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
+
+            if ext == "movpkg" {
+                // Convert movpkg → mp4 inline before saving
+                let asset = AVURLAsset(url: url)
+                let dest = url.deletingPathExtension().appendingPathExtension("mp4")
+                guard let exp = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else { return }
+                exp.outputURL = dest
+                exp.outputFileType = .mp4
+                exp.exportAsynchronously {
+                    guard exp.status == .completed else { return }
+                    PHPhotoLibrary.shared().performChanges {
+                        PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: dest)
+                    }
+                }
+            } else {
+                PHPhotoLibrary.shared().performChanges {
+                    if isVideo {
+                        PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                    } else {
+                        PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
+                    }
                 }
             }
         }

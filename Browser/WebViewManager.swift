@@ -10,6 +10,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     private var pendingDownloadFilename: String?
 
     var downloadManager: MediaDownloadManager?
+    weak var webView: WKWebView?   // set by BrowserWebView for cookie forwarding
 
     // CF bypass guard: prevents didFinish→reload→didFinish infinite loop
     private var cfBypassPending = false
@@ -151,13 +152,17 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             guard let sources = dict["sources"] as? [[String: Any]], let ref = dict["referer"] as? String else { return }
             let title = (dict["title"] as? String) ?? "Media"
             let thumb = (dict["thumb"] as? String).flatMap { URL(string: $0) }
+            var hasHLS = false
             for s in sources {
                 guard let u = (s["url"] as? String).flatMap({ URL(string: $0) }) else { continue }
                 let t: DetectedMedia.MediaType = (s["type"] as? String) == "hls" ? .hls : (s["type"] as? String) == "gif" ? .gif : .mp4
                 let media = DetectedMedia(url: u, type: t, quality: (s["label"] as? String) ?? "default",
                     title: title, referer: ref, thumbnail: thumb, estimatedSize: nil)
                 if !tab.detectedMedia.contains(media) { tab.detectedMedia.append(media); onMediaDetected(media) }
+                if t == .hls { hasHLS = true }
             }
+            // Sync cookies eagerly when HLS is detected (auth streams need them)
+            if hasHLS { syncCookiesToDownloadManager() }
         case "alohaDownload":
             guard let urlStr = dict["url"] as? String, let url = URL(string: urlStr) else { return }
             // Hide overlay signal from webkitendfullscreen
@@ -176,6 +181,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 }
             } else {
                 // Normal Aloha-style: 1-tap download from overlay button
+                syncCookiesToDownloadManager()
                 downloadManager?.download(media: media, saveToVault: false)
                 onMediaDetected(media)
             }
@@ -196,6 +202,16 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 case "tracker_blocked": tab.privacyReport.trackersBlocked += 1; case "ad_blocked": tab.privacyReport.adsBlocked += 1; default: break }
             }
         default: break
+        }
+    }
+
+    // MARK: - Cookie Sync
+    func syncCookiesToDownloadManager() {
+        guard let wv = webView, let dm = downloadManager else { return }
+        wv.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+            let storage = HTTPCookieStorage.shared
+            cookies.forEach { storage.setCookie($0) }
+            dm.cookieStorage = storage
         }
     }
 
