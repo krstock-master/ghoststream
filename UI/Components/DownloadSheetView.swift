@@ -130,7 +130,7 @@ struct DownloadSheetView: View {
                             }
                             Spacer()
                             if dl.saveToVault {
-                                Image(systemName: "lock.fill").font(.caption).foregroundStyle(.tealAlt)
+                                Image(systemName: "lock.fill").font(.caption).foregroundStyle(.purple)
                             }
                         }
                         if let url = dl.localURL {

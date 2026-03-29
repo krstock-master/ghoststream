@@ -62,12 +62,12 @@ struct TabGridView: View {
                         VStack(spacing: 0) {
                             ZStack(alignment: .topTrailing) {
                                 RoundedRectangle(cornerRadius: 10)
-                                    .fill(tab.isPrivate ? .tealAlt.opacity(0.1) : .white.opacity(0.05))
+                                    .fill(tab.isPrivate ? .purple.opacity(0.1) : .white.opacity(0.05))
                                     .frame(height: 120)
                                     .overlay {
                                         VStack {
                                             Image(systemName: tab.isPrivate ? "lock.fill" : "globe").font(.title2)
-                                                .foregroundStyle(tab.isPrivate ? .tealAlt : Color.gray)
+                                                .foregroundStyle(tab.isPrivate ? .purple : Color.gray)
                                             Text(tab.displayTitle).font(.caption2).foregroundStyle(Color.gray).lineLimit(1).padding(.horizontal, 4)
                                         }
                                     }
