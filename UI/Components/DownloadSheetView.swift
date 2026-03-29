@@ -59,7 +59,6 @@ struct DownloadsManagerView: View {
                     Image(systemName: dl.state == .converting ? "arrow.triangle.2.circlepath" : "arrow.down.circle")
                         .foregroundStyle(dl.state == .converting ? .orange : .teal)
                         .frame(width: 28)
-                        .symbolEffect(.rotate, isActive: dl.state == .converting)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(dl.media.title).font(.subheadline).lineLimit(1)
                         Text("\(dl.state == .converting ? "MP4 변환 중..." : dl.formattedProgress) · \(dl.media.type.rawValue)")
