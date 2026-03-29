@@ -1,164 +1,128 @@
-// UI/Components/VPNView.swift
-// GhostStream - WireGuard VPN connection UI
-
+// UI/Components/PrivacyDashboardView.swift
 import SwiftUI
 
-struct VPNView: View {
-    @Environment(VPNManager.self) private var vpn
+struct PrivacyDashboardView: View {
+    @Environment(PrivacyEngine.self) private var privacyEngine
+    @Environment(DNSManager.self) private var dns
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("blockTrackers") private var blockTrackers = true
+    @AppStorage("blockFingerprinting") private var blockFingerprinting = true
+    @AppStorage("blockAds") private var blockAds = true
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    // Connection status
-                    VStack(spacing: 16) {
-                        Image(systemName: vpn.status.icon)
-                            .font(.system(size: 52))
-                            .foregroundStyle(Color(hex: vpn.status.color))
-                            .symbolEffect(.pulse, isActive: vpn.status == .connecting)
-
-                        Text(vpn.status.rawValue)
-                            .font(.title3.bold())
-                            .foregroundStyle(.white)
-
-                        if vpn.status == .connected {
-                            Text(vpn.formattedDuration)
-                                .font(.headline.monospacedDigit())
-                                .foregroundStyle(.secondary)
+            List {
+                // Status overview
+                Section {
+                    HStack {
+                        Image(systemName: "shield.checkered").font(.system(size: 36))
+                            .foregroundStyle(allEnabled ? .green : .orange)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(allEnabled ? "보호 활성화됨" : "일부 보호 비활성").font(.headline)
+                            Text("\(privacyEngine.contentBlocker.ruleCount)개 차단 규칙 적용 중").font(.caption).foregroundStyle(.gray)
                         }
+                        Spacer()
+                    }.padding(.vertical, 4)
+                }
 
-                        if let server = vpn.selectedServer, vpn.status == .connected {
-                            Text("\(server.flag) \(server.name)")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
+                // Shields
+                Section("보호 기능") {
+                    Toggle(isOn: $blockAds) {
+                        Label("광고 차단", systemImage: "nosign")
+                    }.tint(.green)
+                    Toggle(isOn: $blockTrackers) {
+                        Label("트래커 차단", systemImage: "eye.slash.fill")
+                    }.tint(.green)
+                    Toggle(isOn: $blockFingerprinting) {
+                        Label("핑거프린팅 방어", systemImage: "hand.raised.fill")
+                    }.tint(.green)
+                    Toggle(isOn: .constant(true)) {
+                        Label("제3자 쿠키 차단", systemImage: "xmark.shield.fill")
+                    }.tint(.green).disabled(true)
+                    Toggle(isOn: .constant(true)) {
+                        Label("탭별 쿠키 격리", systemImage: "lock.square.stack.fill")
+                    }.tint(.green).disabled(true)
+                }
 
-                        // Connect/Disconnect button
+                // DNS
+                Section("Privacy DNS") {
+                    ForEach(DNSManager.Provider.allCases) { provider in
                         Button {
-                            Task { await vpn.toggle() }
+                            Task { await dns.apply(provider: provider) }
                         } label: {
-                            Text(vpn.status == .connected ? "연결 해제" : "연결")
-                                .font(.headline)
-                                .foregroundStyle(vpn.status == .connected ? .white : .black)
-                                .frame(width: 160, height: 48)
-                                .background(
-                                    vpn.status == .connected ? GhostTheme.danger : GhostTheme.accent,
-                                    in: Capsule()
-                                )
-                        }
-                    }
-                    .padding()
-                    .glass()
-
-                    // Server list
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("서버 목록")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-
-                        // Free servers
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("무료")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.tertiary)
-
-                            ForEach(vpn.servers.filter { !$0.isPro }) { server in
-                                serverRow(server)
-                            }
-                        }
-
-                        // Pro servers
-                        VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Text("Pro")
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(GhostTheme.accentAlt)
-                                Image(systemName: "crown.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(GhostTheme.warning)
-                            }
-
-                            ForEach(vpn.servers.filter { $0.isPro }) { server in
-                                serverRow(server)
+                                Image(systemName: provider.icon)
+                                    .foregroundStyle(dns.activeProvider == provider ? .green : .gray)
+                                    .frame(width: 24)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(provider.rawValue)
+                                        .foregroundStyle(colorScheme == .dark ? .white : .black)
+                                    if !provider.serverURL.isEmpty {
+                                        Text(provider.serverURL).font(.caption).foregroundStyle(.gray)
+                                    }
+                                }
+                                Spacer()
+                                if dns.activeProvider == provider {
+                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                                }
                             }
                         }
                     }
+                }
 
-                    // Privacy policy
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("프라이버시 정책")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-
-                        policyRow("🚫", "연결 로그 수집 없음 (No-logs)")
-                        policyRow("💾", "RAM-only 서버 (재시작 시 데이터 소멸)")
-                        policyRow("🔒", "WireGuard 프로토콜 (최신 암호화)")
-                        policyRow("🌍", "14 Eyes 외 관할 서버 우선")
+                // Tracking prevention info
+                Section("추적 금지") {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Do Not Track 헤더").font(.subheadline)
+                            Text("모든 웹 요청에 DNT:1 헤더 전송").font(.caption).foregroundStyle(.gray)
+                        }
                     }
-                    .padding()
-                    .glass()
-
-                    if let error = vpn.error {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(GhostTheme.danger)
-                            .padding()
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("GPC (Global Privacy Control)").font(.subheadline)
+                            Text("사이트에 개인정보 판매 금지 요청").font(.caption).foregroundStyle(.gray)
+                        }
+                    }
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("제로 텔레메트리").font(.subheadline)
+                            Text("앱이 어떤 데이터도 외부로 전송하지 않음").font(.caption).foregroundStyle(.gray)
+                        }
                     }
                 }
-                .padding()
-            }
-            .background(GhostTheme.bg)
-            .navigationTitle("VPN")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("닫기") { dismiss() }
-                        .foregroundStyle(GhostTheme.accent)
+
+                // What's blocked
+                Section("차단 대상 (30,000+ 규칙)") {
+                    blockRow("Google Analytics", "google-analytics.com")
+                    blockRow("Facebook Pixel", "facebook.com/tr")
+                    blockRow("DoubleClick Ads", "doubleclick.net")
+                    blockRow("Hotjar", "hotjar.com")
+                    blockRow("Amplitude", "amplitude.com")
+                    blockRow("TikTok Analytics", "analytics.tiktok.com")
+                    blockRow("기타 30,000+ 도메인", "easylist + easyprivacy")
                 }
             }
+            .navigationTitle("프라이버시").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("닫기") { dismiss() } } }
         }
     }
 
-    private func serverRow(_ server: VPNServer) -> some View {
-        Button {
-            Task { await vpn.connect(to: server) }
-        } label: {
-            HStack(spacing: 12) {
-                Text(server.flag)
-                    .font(.title2)
+    private var allEnabled: Bool { blockTrackers && blockFingerprinting && blockAds }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(server.name)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white)
-                    Text(server.country)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Text("\(server.ping)ms")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(server.ping < 50 ? GhostTheme.success : server.ping < 150 ? GhostTheme.warning : GhostTheme.danger)
-
-                if vpn.selectedServer?.id == server.id && vpn.status == .connected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(GhostTheme.success)
-                }
+    private func blockRow(_ name: String, _ domain: String) -> some View {
+        HStack {
+            Image(systemName: "xmark.circle.fill").foregroundStyle(.red).font(.caption)
+            VStack(alignment: .leading) {
+                Text(name).font(.subheadline)
+                Text(domain).font(.caption).foregroundStyle(.gray)
             }
-            .padding(12)
-            .glass()
-        }
-    }
-
-    private func policyRow(_ emoji: String, _ text: String) -> some View {
-        HStack(spacing: 10) {
-            Text(emoji)
-            Text(text)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            Spacer()
+            Text("차단됨").font(.caption2).foregroundStyle(.red)
         }
     }
 }

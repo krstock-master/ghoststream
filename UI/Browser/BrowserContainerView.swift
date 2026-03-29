@@ -9,126 +9,171 @@ struct BrowserContainerView: View {
     @Environment(VaultManager.self) private var vaultManager
     @Environment(VPNManager.self) private var vpnManager
     @Environment(DIContainer.self) private var container
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var addressText = ""
     @State private var showDownloadSheet = false
     @State private var showVault = false
     @State private var showSettings = false
-    @State private var showVPN = false
+    @State private var showPrivacy = false
     @State private var showPrivacyReport = false
     @State private var showTabGrid = false
     @State private var latestMedia: DetectedMedia?
     @State private var showMediaSnackbar = false
     @State private var webViewRef: WKWebView?
+    @State private var isElementHideMode = false
+
+    private var bgColor: Color { colorScheme == .dark ? Color(hex: "0A0A14") : Color(hex: "F2F2F7") }
+    private var barColor: Color { colorScheme == .dark ? Color(hex: "1C1C1E") : .white }
+    private var textColor: Color { colorScheme == .dark ? .white : .black }
 
     var body: some View {
         VStack(spacing: 0) {
             if let url = tabManager.activeTab?.url, url.scheme == "http" {
                 InsecureConnectionBanner(url: url)
             }
+            if isElementHideMode { elementHideBanner }
             addressBar
             tabBar
             ZStack(alignment: .bottom) {
-                webArea
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                webArea.frame(maxWidth: .infinity, maxHeight: .infinity)
                 if showMediaSnackbar, let media = latestMedia {
-                    snackbar(media).padding(.horizontal, 12).padding(.bottom, 8)
+                    snackbar(media).padding(.horizontal, 16).padding(.bottom, 12)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
             toolbar
         }
-        .background(GhostTheme.bg)
+        .background(bgColor)
         .ignoresSafeArea(.keyboard)
         .onChange(of: tabManager.activeTab?.url) { _, url in addressText = url?.absoluteString ?? "" }
-        .onReceive(NotificationCenter.default.publisher(for: .openInNewTab)) { notif in
-            if let url = notif.object as? URL {
-                tabManager.newTab(url: url)
-            }
+        .onReceive(NotificationCenter.default.publisher(for: .openInNewTab)) { n in
+            if let url = n.object as? URL { tabManager.newTab(url: url) }
         }
         .sheet(isPresented: $showDownloadSheet) { DownloadSheetView(media: latestMedia) }
         .sheet(isPresented: $showVault) { VaultView() }
         .sheet(isPresented: $showSettings) { SettingsView() }
-        .sheet(isPresented: $showVPN) { VPNView() }
+        .sheet(isPresented: $showPrivacy) { PrivacyDashboardView() }
         .sheet(isPresented: $showPrivacyReport) { PrivacyReportSheet(tab: tabManager.activeTab) }
         .sheet(isPresented: $showTabGrid) { TabGridView() }
     }
 
-    private var addressBar: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Button { showPrivacyReport = true } label: {
-                    Image(systemName: tabManager.activeTab?.isSecure == true ? "lock.fill" : "lock.open.fill")
-                        .font(.caption)
-                        .foregroundStyle(tabManager.activeTab?.isSecure == true ? GhostTheme.success : GhostTheme.danger)
-                }
-                TextField("검색어 또는 주소 입력", text: $addressText)
-                    .textFieldStyle(.plain).font(.subheadline).foregroundStyle(.white)
-                    .autocorrectionDisabled().textInputAutocapitalization(.never)
-                    .onSubmit { navigateTo(addressText) }
-                if !addressText.isEmpty {
-                    Button {
-                        if tabManager.activeTab?.isLoading == true { webViewRef?.stopLoading() }
-                        else { addressText = "" }
-                    } label: {
-                        Image(systemName: tabManager.activeTab?.isLoading == true ? "xmark" : "xmark.circle.fill")
-                            .font(.caption).foregroundStyle(Color.gray)
-                    }
-                }
-                Menu {
-                    Button { tabManager.newTab() } label: { Label("새 탭", systemImage: "plus.square") }
-                    Button { tabManager.newTab(isPrivate: true) } label: { Label("프라이빗 탭", systemImage: "lock.square") }
-                    Divider()
-                    Button { showVault = true } label: { Label("보관함", systemImage: "lock.shield.fill") }
-                    Button { showDownloadSheet = true } label: { Label("다운로드", systemImage: "arrow.down.circle") }
-                    Divider()
-                    Button { showVPN = true } label: { Label("VPN", systemImage: "shield.fill") }
-                    Button { showSettings = true } label: { Label("설정", systemImage: "gearshape.fill") }
-                    Divider()
-                    Button(role: .destructive) { tabManager.closeAllTabs() } label: { Label("모든 탭 닫기", systemImage: "xmark.square") }
-                } label: {
-                    Image(systemName: "ellipsis").font(.body).foregroundStyle(Color.gray)
-                }
+    // MARK: - Element Hide Mode Banner
+    private var elementHideBanner: some View {
+        HStack {
+            Image(systemName: "eye.slash.fill").foregroundStyle(.white)
+            Text("요소 가리기 모드 — 숨기려는 요소를 탭하세요")
+                .font(.caption).foregroundStyle(.white)
+            Spacer()
+            Button("완료") {
+                isElementHideMode = false
+                webViewRef?.evaluateJavaScript("window._gsToggleHideMode()")
             }
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .glass(12).padding(.horizontal, 8).padding(.top, 4)
-            if tabManager.activeTab?.isLoading == true {
-                GeometryReader { geo in
-                    Rectangle().fill(GhostTheme.gradient)
-                        .frame(width: geo.size.width * (tabManager.activeTab?.loadProgress ?? 0), height: 2)
-                }.frame(height: 2)
-            }
+            .font(.caption.bold()).foregroundStyle(.white)
+            .padding(.horizontal, 12).padding(.vertical, 4)
+            .background(.white.opacity(0.2), in: Capsule())
         }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(Color(hex: "FF4757"))
     }
 
+    // MARK: - Address Bar (Safari-style)
+    private var addressBar: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Button { showPrivacyReport = true } label: {
+                    Image(systemName: tabManager.activeTab?.isSecure == true ? "lock.fill" : "lock.open.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(tabManager.activeTab?.isSecure == true ? .green : .red)
+                }
+                TextField("검색어 또는 주소 입력", text: $addressText)
+                    .textFieldStyle(.plain).font(.system(size: 15))
+                    .foregroundStyle(textColor)
+                    .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    .onSubmit { navigateTo(addressText) }
+                if tabManager.activeTab?.isLoading == true {
+                    ProgressView().scaleEffect(0.7)
+                } else if !addressText.isEmpty {
+                    Button { addressText = "" } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 14)).foregroundStyle(.gray)
+                    }
+                }
+                // Menu
+                Menu {
+                    Section("탭") {
+                        Button { tabManager.newTab() } label: { Label("새 탭", systemImage: "plus.square") }
+                        Button { tabManager.newTab(isPrivate: true) } label: { Label("프라이빗 탭", systemImage: "lock.square") }
+                    }
+                    Section("도구") {
+                        Button { showDownloadSheet = true } label: { Label("다운로드", systemImage: "arrow.down.circle") }
+                        Button { showVault = true } label: { Label("보관함", systemImage: "lock.shield.fill") }
+                        Button {
+                            isElementHideMode = true
+                            webViewRef?.evaluateJavaScript("window._gsToggleHideMode()")
+                        } label: { Label("방해 요소 가리기", systemImage: "eye.slash") }
+                        Button {
+                            if let host = tabManager.activeTab?.url?.host {
+                                ElementHiderStore.shared.clearRules(for: host)
+                                webViewRef?.reload()
+                            }
+                        } label: { Label("숨긴 요소 복원", systemImage: "eye") }
+                    }
+                    Section("보안") {
+                        Button { showPrivacy = true } label: { Label("프라이버시 대시보드", systemImage: "shield.checkered") }
+                        Button { showSettings = true } label: { Label("설정", systemImage: "gearshape.fill") }
+                    }
+                    Section { Button(role: .destructive) { tabManager.closeAllTabs() } label: { Label("모든 탭 닫기", systemImage: "xmark.square") } }
+                } label: {
+                    Image(systemName: "ellipsis.circle").font(.system(size: 18)).foregroundStyle(textColor.opacity(0.6))
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 8).padding(.vertical, 6)
+
+            if tabManager.activeTab?.isLoading == true {
+                GeometryReader { geo in
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.accentColor)
+                        .frame(width: geo.size.width * (tabManager.activeTab?.loadProgress ?? 0), height: 2)
+                }.frame(height: 2).padding(.horizontal, 8)
+            }
+        }
+        .background(barColor)
+    }
+
+    // MARK: - Tab Bar
     private var tabBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
                 ForEach(tabManager.tabs) { tab in
-                    TabPill(tab: tab, isActive: tab.id == tabManager.activeTabID,
+                    TabPill(tab: tab, isActive: tab.id == tabManager.activeTabID, colorScheme: colorScheme,
                             onTap: { tabManager.switchTo(tab) }, onClose: { tabManager.closeTab(tab) })
                 }
                 Button { tabManager.newTab() } label: {
-                    Image(systemName: "plus").font(.caption2).foregroundStyle(Color.gray)
-                        .frame(width: 28, height: 28).glass(8)
+                    Image(systemName: "plus").font(.caption2).foregroundStyle(.gray)
+                        .frame(width: 28, height: 28)
+                        .background(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
-            }.padding(.horizontal, 8).padding(.vertical, 4)
+            }.padding(.horizontal, 8).padding(.vertical, 2)
         }
+        .background(barColor)
     }
 
     @ViewBuilder
     private var webArea: some View {
         if let tab = tabManager.activeTab {
             if tab.url == nil {
-                NewTabPage { navigateTo($0) }
+                NewTabPage(colorScheme: colorScheme) { navigateTo($0) }
             } else {
                 BrowserWebView(tab: tab, privacyEngine: privacyEngine,
                     onMediaDetected: { media in
                         latestMedia = media
                         withAnimation { showMediaSnackbar = true }
                         Task { try? await Task.sleep(for: .seconds(6)); withAnimation { showMediaSnackbar = false } }
-                    }, webViewRef: $webViewRef)
-                .id(tab.id)
+                    }, webViewRef: $webViewRef).id(tab.id)
             }
         }
     }
@@ -136,46 +181,47 @@ struct BrowserContainerView: View {
     private func snackbar(_ media: DetectedMedia) -> some View {
         Button { showDownloadSheet = true } label: {
             HStack(spacing: 10) {
-                Image(systemName: "film.fill").foregroundStyle(GhostTheme.accent)
+                Image(systemName: "film.fill").foregroundStyle(GhostTheme.accent).font(.title3)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("미디어 감지됨").font(.caption.weight(.semibold)).foregroundStyle(.white)
-                    Text("\(media.type.rawValue) · \(media.quality)").font(.caption2).foregroundStyle(Color.gray)
+                    Text("미디어 감지됨").font(.subheadline.weight(.medium)).foregroundStyle(textColor)
+                    Text("\(media.type.rawValue) · \(media.quality)").font(.caption).foregroundStyle(.gray)
                 }
                 Spacer()
-                Text("저장 ▸").font(.caption.weight(.bold)).foregroundStyle(GhostTheme.accent)
-            }.padding(12).glass(14)
+                Text("저장").font(.subheadline.weight(.semibold)).foregroundStyle(GhostTheme.accent)
+                    .padding(.horizontal, 14).padding(.vertical, 6)
+                    .background(GhostTheme.accent.opacity(0.15)).clipShape(Capsule())
+            }.padding(14)
+            .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 14))
         }
     }
 
+    // MARK: - Toolbar (Safari-style)
     private var toolbar: some View {
         HStack(spacing: 0) {
             tbtn("chevron.left", tabManager.activeTab?.canGoBack == true) { webViewRef?.goBack() }
             tbtn("chevron.right", tabManager.activeTab?.canGoForward == true) { webViewRef?.goForward() }
-            tbtn("arrow.down.circle", true) { showDownloadSheet = true }
+            tbtn("arrow.down.circle\(downloadManager.downloads.isEmpty ? "" : ".fill")", true) { showDownloadSheet = true }
             Button { showTabGrid = true } label: {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: "square.on.square").font(.system(size: 18)).foregroundStyle(.white)
-                        .frame(maxWidth: .infinity).frame(height: 40)
-                    if tabManager.tabs.count > 1 {
-                        Text("\(tabManager.tabs.count)").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
-                            .frame(width: 16, height: 16).background(GhostTheme.accent, in: Circle()).offset(x: -12, y: 2)
-                    }
-                }
+                ZStack {
+                    RoundedRectangle(cornerRadius: 5).stroke(textColor.opacity(0.5), lineWidth: 1.5)
+                        .frame(width: 22, height: 22)
+                    Text("\(tabManager.tabs.count)").font(.system(size: 12, weight: .medium)).foregroundStyle(textColor)
+                }.frame(maxWidth: .infinity).frame(height: 44)
             }
-            tbtn("lock.shield.fill", true) { showVault = true }
-        }.padding(.vertical, 6).padding(.bottom, 4).background(GhostTheme.surface)
+            tbtn("lock.shield", true) { showVault = true }
+        }.padding(.bottom, 4).background(barColor)
     }
 
     private func tbtn(_ icon: String, _ on: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon).font(.system(size: 18)).foregroundStyle(on ? .white : .white.opacity(0.3))
-                .frame(maxWidth: .infinity).frame(height: 40)
+            Image(systemName: icon).font(.system(size: 18))
+                .foregroundStyle(on ? textColor : textColor.opacity(0.25))
+                .frame(maxWidth: .infinity).frame(height: 44)
         }.disabled(!on)
     }
 
     private func navigateTo(_ input: String) {
-        let t = input.trimmingCharacters(in: .whitespaces)
-        guard !t.isEmpty else { return }
+        let t = input.trimmingCharacters(in: .whitespaces); guard !t.isEmpty else { return }
         let url: URL
         if t.hasPrefix("http://") || t.hasPrefix("https://"), let u = URL(string: t) { url = u }
         else if t.contains(".") && !t.contains(" "), let u = URL(string: "https://\(t)") { url = u }
@@ -185,35 +231,39 @@ struct BrowserContainerView: View {
             url = u
         }
         tabManager.activeTab?.url = url
-        webViewRef?.load(URLRequest(url: url))
-        addressText = url.absoluteString
+        webViewRef?.load(URLRequest(url: url)); addressText = url.absoluteString
     }
 }
 
 struct TabPill: View {
-    let tab: Tab; let isActive: Bool; let onTap: () -> Void; let onClose: () -> Void
+    let tab: Tab; let isActive: Bool; let colorScheme: ColorScheme
+    let onTap: () -> Void; let onClose: () -> Void
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             if tab.isPrivate { Image(systemName: "lock.fill").font(.system(size: 8)).foregroundStyle(GhostTheme.accentAlt) }
-            Text(tab.displayTitle).font(.caption2).foregroundStyle(isActive ? .white : Color.gray).lineLimit(1).frame(maxWidth: 100)
-            Button(action: onClose) { Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(Color.gray.opacity(0.5)) }
+            Text(tab.displayTitle).font(.system(size: 12)).foregroundStyle(isActive ? (colorScheme == .dark ? .white : .black) : .gray)
+                .lineLimit(1).frame(maxWidth: 90)
+            Button(action: onClose) { Image(systemName: "xmark").font(.system(size: 8, weight: .semibold)).foregroundStyle(.gray) }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(isActive ? .white.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(isActive ? GhostTheme.accent.opacity(0.3) : .clear, lineWidth: 0.5))
+        .background(isActive ? (colorScheme == .dark ? .white.opacity(0.12) : .black.opacity(0.06)) : .clear)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
         .onTapGesture(perform: onTap)
     }
 }
 
 struct NewTabPage: View {
+    let colorScheme: ColorScheme
     let onNavigate: (String) -> Void
     var body: some View {
         ScrollView {
-            VStack(spacing: 32) {
-                Spacer().frame(height: 60)
-                Image(systemName: "globe").font(.system(size: 48)).foregroundStyle(GhostTheme.accent.opacity(0.6))
-                Text("GhostStream").font(.title.bold()).foregroundStyle(.white)
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 16) {
+            VStack(spacing: 28) {
+                Spacer().frame(height: 50)
+                Image(systemName: "globe").font(.system(size: 44, weight: .thin))
+                    .foregroundStyle(GhostTheme.accent)
+                Text("GhostStream").font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(colorScheme == .dark ? .white : .black)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 20) {
                     ql("Google", "magnifyingglass", "https://google.com")
                     ql("YouTube", "play.rectangle.fill", "https://youtube.com")
                     ql("GitHub", "chevron.left.forwardslash.chevron.right", "https://github.com")
@@ -222,16 +272,19 @@ struct NewTabPage: View {
                     ql("Twitter", "at", "https://x.com")
                     ql("Wiki", "book.fill", "https://wikipedia.org")
                     ql("DDG", "shield.fill", "https://duckduckgo.com")
-                }.padding(.horizontal)
+                }.padding(.horizontal, 24)
                 Spacer()
             }
-        }.background(GhostTheme.bg)
+        }.background(colorScheme == .dark ? Color(hex: "0A0A14") : Color(hex: "F2F2F7"))
     }
     private func ql(_ n: String, _ i: String, _ u: String) -> some View {
         Button { onNavigate(u) } label: {
-            VStack(spacing: 6) {
-                Image(systemName: i).font(.title3).foregroundStyle(GhostTheme.accent).frame(width: 50, height: 50).glass(14)
-                Text(n).font(.caption2).foregroundStyle(Color.gray)
+            VStack(spacing: 8) {
+                Image(systemName: i).font(.system(size: 22))
+                    .foregroundStyle(GhostTheme.accent)
+                    .frame(width: 52, height: 52)
+                    .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
+                Text(n).font(.system(size: 11)).foregroundStyle(.gray)
             }
         }
     }
