@@ -1,0 +1,125 @@
+/* Korean - GhostStream */
+
+// Browser
+"browser.newTab" = "새 탭";
+"browser.search.placeholder" = "검색어 또는 주소 입력";
+"browser.quickLinks" = "빠른 바로가기";
+
+// Tabs
+"tabs.title" = "탭";
+"tabs.new" = "새 탭";
+"tabs.newPrivate" = "새 프라이빗 탭";
+"tabs.closeAll" = "모든 탭 닫기";
+"tabs.count" = "탭 (%d)";
+"tabs.done" = "완료";
+
+// Menu
+"menu.title" = "메뉴";
+"menu.close" = "닫기";
+"menu.tools" = "도구";
+"menu.security" = "보안";
+"menu.vault" = "보관함";
+"menu.downloads" = "다운로드";
+"menu.history" = "방문 기록";
+"menu.bookmarks" = "북마크";
+"menu.privacy" = "프라이버시 설정";
+"menu.settings" = "설정";
+
+// Privacy
+"privacy.title" = "프라이버시 리포트";
+"privacy.score" = "프라이버시 점수";
+"privacy.blocked" = "이 페이지에서 차단됨";
+"privacy.ads" = "광고";
+"privacy.trackers" = "트래커";
+"privacy.fingerprint" = "핑거프린트 시도";
+"privacy.cookieIsolated" = "쿠키 격리됨";
+"privacy.cookieInfo" = "이 탭의 쿠키는 다른 탭에 영향 없음";
+
+// Downloads
+"download.title" = "다운로드";
+"download.new" = "새 다운로드";
+"download.active" = "진행 중";
+"download.completed" = "완료";
+"download.noMedia" = "감지된 미디어 없음";
+"download.detected" = "미디어 감지됨";
+"download.save" = "저장 ▸";
+"download.quality" = "화질 선택";
+"download.recommended" = "권장";
+"download.location" = "저장 위치";
+"download.vault" = "🔒 잠금 보관함 (암호화)";
+"download.files" = "📁 파일 앱";
+"download.start" = "저장 시작";
+"download.pause" = "일시정지";
+"download.resume" = "재개";
+"download.cancel" = "취소";
+"download.retry" = "재시도";
+
+// Vault
+"vault.title" = "🔒 보관함";
+"vault.locked" = "보관함이 잠겨있습니다";
+"vault.unlock" = "잠금 해제";
+"vault.unlockDesc" = "Face ID 또는 패스코드로 잠금 해제";
+"vault.lock" = "잠금";
+"vault.empty" = "보관함이 비어있습니다";
+"vault.all" = "전체";
+"vault.video" = "영상";
+"vault.gif" = "GIF";
+"vault.other" = "기타";
+"vault.delete" = "삭제";
+"vault.deleteConfirm" = "이 파일을 영구적으로 삭제하시겠습니까?";
+"vault.share" = "공유";
+"vault.export" = "내보내기";
+"vault.files" = "파일";
+
+// VPN
+"vpn.title" = "VPN";
+"vpn.connected" = "연결됨";
+"vpn.connecting" = "연결 중…";
+"vpn.disconnected" = "연결 안 됨";
+"vpn.disconnect" = "연결 해제";
+"vpn.connect" = "연결";
+"vpn.servers" = "서버 목록";
+"vpn.free" = "무료";
+"vpn.pro" = "Pro";
+"vpn.privacy" = "프라이버시 정책";
+"vpn.noLogs" = "연결 로그 수집 없음 (No-logs)";
+"vpn.ramOnly" = "RAM-only 서버 (재시작 시 데이터 소멸)";
+"vpn.wireGuard" = "WireGuard 프로토콜 (최신 암호화)";
+"vpn.jurisdiction" = "14 Eyes 외 관할 서버 우선";
+
+// Settings
+"settings.title" = "설정";
+"settings.done" = "완료";
+"settings.privacy" = "프라이버시";
+"settings.trackerBlock" = "트래커 차단";
+"settings.fingerprintDefense" = "핑거프린팅 방어";
+"settings.adBlock" = "광고 차단";
+"settings.doh" = "DNS over HTTPS";
+"settings.ruleCount" = "차단 룰 수";
+"settings.vpn" = "VPN";
+"settings.vpnAutoConnect" = "VPN 자동 연결";
+"settings.killSwitch" = "Kill Switch";
+"settings.download" = "다운로드";
+"settings.defaultQuality" = "기본 화질";
+"settings.autoLockVault" = "Vault 자동 잠금";
+"settings.appearance" = "외관";
+"settings.forceDark" = "웹 강제 다크모드";
+"settings.tabPosition" = "탭바 위치";
+"settings.tabTop" = "상단";
+"settings.tabBottom" = "하단";
+"settings.search" = "검색";
+"settings.searchEngine" = "기본 검색 엔진";
+"settings.about" = "정보";
+"settings.version" = "버전";
+"settings.privacyPolicy" = "개인정보처리방침";
+"settings.licenses" = "오픈소스 라이선스";
+
+// Onboarding
+"onboarding.next" = "다음";
+"onboarding.start" = "시작하기";
+"onboarding.agree" = "위 사항을 이해하고 동의합니다";
+"onboarding.subtitle" = "프라이버시 미디어 브라우저";
+"onboarding.tagline" = "보고 싶은 건 저장하고,\n내가 뭘 봤는지는 아무도 모른다.";
+"onboarding.privacy.title" = "Brave급 프라이버시";
+"onboarding.download.title" = "모든 미디어 다운로드";
+"onboarding.security.title" = "사용 전 주의사항";

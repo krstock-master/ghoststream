@@ -1,0 +1,79 @@
+name: GhostStream
+options:
+  bundleIdPrefix: com.ghoststream
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    INFOPLIST_FILE: GhostStream/Info.plist
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_IDENTITY: "Apple Development"
+    CODE_SIGN_STYLE: "Automatic"
+    DEVELOPMENT_TEAM: ""
+  configs:
+    Debug:
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+      SWIFT_COMPILATION_MODE: "wholemodule"
+
+targets:
+  GhostStream:
+    type: application
+    platform: iOS
+    sources:
+      - path: GhostStream
+        excludes:
+          - Tests/**
+          - "*.sh"
+          - "*.md"
+          - "*.yml"
+          - .github/**
+          - ExportOptions.plist
+          - DEPENDENCIES.swift
+          - VPN/Tunnel/**
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ghoststream.browser
+        PRODUCT_NAME: "GhostStream"
+    info:
+      path: GhostStream/Info.plist
+
+  GhostStreamTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: GhostStream/Tests
+    dependencies:
+      - target: GhostStream
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ghoststream.browser.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/GhostStream.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/GhostStream"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  GhostStream:
+    build:
+      targets:
+        GhostStream: all
+        GhostStreamTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - GhostStreamTests
+    profile:
+      config: Release
+    archive:
+      config: Release

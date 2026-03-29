@@ -1,0 +1,122 @@
+[
+  {
+    "trigger": { "url-filter": "google-analytics\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "googletagmanager\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "googlesyndication\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "connect\\.facebook\\.net" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "facebook\\.com/tr" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "pixel\\.facebook\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "doubleclick\\.net" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "adservice\\.google" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "ads\\.yahoo\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "advertising\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "adsrvr\\.org" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "scorecardresearch\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "quantserve\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "hotjar\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "mixpanel\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "segment\\.io" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "segment\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "amplitude\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "criteo\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "taboola\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "outbrain\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "fingerprintjs\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "cdn\\.jsdelivr\\.net.*fingerprint" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "sentry\\.io" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "bugsnag\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "bat\\.bing\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "analytics\\.tiktok\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": { "url-filter": "snap\\.licdn\\.com" },
+    "action": { "type": "block" }
+  },
+  {
+    "trigger": {
+      "url-filter": ".*",
+      "load-type": ["third-party"],
+      "resource-type": ["raw"]
+    },
+    "action": { "type": "block-cookies" }
+  }
+]

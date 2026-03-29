@@ -1,0 +1,138 @@
+name: Build GhostStream IPA
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:  # 수동 실행 버튼
+
+jobs:
+  build:
+    name: Build IPA
+    runs-on: macos-14  # Apple Silicon Mac (M1) with Xcode 16
+    
+    steps:
+      # 1. 코드 체크아웃
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Xcode 버전 설정
+      - name: Select Xcode 16
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.0.app/Contents/Developer
+          xcodebuild -version
+          swift --version
+
+      # 3. xcodegen 설치 & 프로젝트 생성
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      # 4. 빌드 (시뮬레이터용 - 서명 불필요)
+      - name: Build for Simulator
+        run: |
+          xcodebuild build \
+            -scheme GhostStream \
+            -destination "platform=iOS Simulator,name=iPhone 16,OS=18.0" \
+            -configuration Debug \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcpretty
+
+      # 5. 테스트 실행
+      - name: Run Unit Tests
+        run: |
+          xcodebuild test \
+            -scheme GhostStream \
+            -destination "platform=iOS Simulator,name=iPhone 16,OS=18.0" \
+            -configuration Debug \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcpretty
+
+      # 6. 서명 없는 IPA 빌드 (SideStore/TrollStore용)
+      - name: Build unsigned IPA
+        run: |
+          # Archive
+          xcodebuild archive \
+            -scheme GhostStream \
+            -configuration Release \
+            -archivePath build/GhostStream.xcarchive \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            | xcpretty
+          
+          # IPA 수동 패키징 (서명 없이)
+          mkdir -p build/Payload
+          cp -r build/GhostStream.xcarchive/Products/Applications/GhostStream.app build/Payload/
+          cd build && zip -r GhostStream.ipa Payload/
+          echo "✅ IPA created: build/GhostStream.ipa"
+          ls -lh GhostStream.ipa
+
+      # 7. IPA 아티팩트 업로드
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GhostStream-IPA
+          path: build/GhostStream.ipa
+          retention-days: 90
+
+      # 8. 빌드 결과 출력
+      - name: Build summary
+        run: |
+          echo "## 🎉 Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| IPA | GhostStream.ipa |" >> $GITHUB_STEP_SUMMARY
+          echo "| Size | $(ls -lh build/GhostStream.ipa | awk '{print $5}') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | iOS 16.0+ (iPhone & iPad) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Config | Release (unsigned) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📱 Install via SideStore / TrollStore" >> $GITHUB_STEP_SUMMARY
+          echo "Download the IPA from Artifacts above and install with SideStore, TrollStore, or Sideloadly." >> $GITHUB_STEP_SUMMARY
+
+  # Release job - 태그 푸시 시 자동 릴리스
+  release:
+    name: Create Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download IPA artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: GhostStream-IPA
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: GhostStream.ipa
+          body: |
+            ## GhostStream ${{ github.ref_name }}
+            
+            iOS Privacy Media Browser
+            
+            ### 설치 방법
+            1. 아래 `GhostStream.ipa` 다운로드
+            2. SideStore, TrollStore, 또는 Sideloadly로 설치
+            
+            ### 주요 기능
+            - JW Player / HLS / MP4 / GIF / Blob 미디어 감지 & 다운로드
+            - 7-벡터 핑거프린팅 방어
+            - AES-256-GCM 암호화 Vault (Face ID)
+            - WireGuard VPN
+            - 탭별 쿠키 완전 격리
+          generate_release_notes: true

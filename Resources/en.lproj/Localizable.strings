@@ -1,0 +1,28 @@
+/* English - GhostStream */
+
+"browser.newTab" = "New Tab";
+"browser.search.placeholder" = "Search or enter address";
+"browser.quickLinks" = "Quick Links";
+"tabs.title" = "Tabs";
+"tabs.new" = "New Tab";
+"tabs.newPrivate" = "New Private Tab";
+"tabs.closeAll" = "Close All Tabs";
+"tabs.count" = "Tabs (%d)";
+"tabs.done" = "Done";
+"menu.title" = "Menu";
+"menu.close" = "Close";
+"download.title" = "Downloads";
+"download.detected" = "Media Detected";
+"download.save" = "Save ▸";
+"download.start" = "Start Download";
+"vault.title" = "🔒 Vault";
+"vault.locked" = "Vault is locked";
+"vault.unlock" = "Unlock";
+"vpn.title" = "VPN";
+"vpn.connected" = "Connected";
+"vpn.disconnected" = "Disconnected";
+"settings.title" = "Settings";
+"settings.done" = "Done";
+"onboarding.next" = "Next";
+"onboarding.start" = "Get Started";
+"onboarding.agree" = "I understand and agree to the above";

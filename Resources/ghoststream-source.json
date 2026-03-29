@@ -1,0 +1,54 @@
+{
+  "name": "GhostStream Repo",
+  "identifier": "com.ghoststream.source",
+  "sourceURL": "https://your-server.com/ghoststream-source.json",
+  "apps": [
+    {
+      "name": "GhostStream",
+      "bundleIdentifier": "com.ghoststream.browser",
+      "developerName": "GhostStream Dev",
+      "subtitle": "Privacy Media Browser",
+      "version": "0.1.0",
+      "versionDate": "2026-03-29",
+      "versionDescription": "Initial release:\n- WKWebView browser with per-tab cookie isolation\n- JW Player / HLS / MP4 / GIF / Blob media detection\n- AES-256-GCM encrypted Vault with Face ID\n- 7-vector fingerprint defense\n- WKContentRuleList tracker/ad blocking\n- DNS over HTTPS\n- WireGuard VPN integration\n- Vivaldi-style tab management",
+      "downloadURL": "https://your-server.com/GhostStream.ipa",
+      "localizedDescription": "보고 싶은 건 저장하고, 내가 뭘 봤는지는 아무도 모른다.\n\nGhostStream은 JW Player를 포함한 모든 웹 영상·GIF·짤을 다운받을 수 있고, Brave·Mullvad 수준의 프라이버시를 제공하는 iOS 전용 브라우저입니다.",
+      "iconURL": "https://your-server.com/ghoststream-icon.png",
+      "tintColor": "00D4AA",
+      "size": 15000000,
+      "permissions": [
+        {
+          "type": "network",
+          "usageDescription": "브라우징 및 다운로드"
+        },
+        {
+          "type": "faceid",
+          "usageDescription": "Vault 잠금 해제"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [
+          {
+            "name": "com.apple.developer.networking.networkextension"
+          }
+        ],
+        "privacy": [
+          {
+            "name": "FaceID",
+            "usageDescription": "보관함 잠금 해제에 Face ID를 사용합니다."
+          }
+        ]
+      }
+    }
+  ],
+  "news": [
+    {
+      "title": "GhostStream v0.1.0 출시",
+      "identifier": "release-0.1.0",
+      "caption": "프라이버시 미디어 브라우저 첫 릴리스",
+      "date": "2026-03-29",
+      "tintColor": "00D4AA",
+      "notify": true
+    }
+  ]
+}
