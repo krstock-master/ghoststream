@@ -81,7 +81,7 @@ struct BrowserContainerView: View {
             if tab.url == nil {
                 NewTabPage { navigateTo($0) }
             } else {
-                BrowserWebView(tab: tab, privacyEngine: privacyEngine,
+                BrowserWebView(tab: tab, privacyEngine: privacyEngine, downloadManager: downloadManager,
                     onMediaDetected: { media in
                         latestMedia = media
                         withAnimation { showMediaSnackbar = true }
@@ -130,7 +130,7 @@ struct BrowserContainerView: View {
                     Button { withAnimation { isAddressEditing = true } } label: {
                         HStack(spacing: 6) {
                             Image(systemName: tabManager.activeTab?.isSecure == true ? "lock.fill" : "lock.open.fill")
-                                .font(.system(size: 10)).foregroundStyle(tabManager.activeTab?.isSecure == true ? .secondary : .red)
+                                .font(.system(size: 10)).foregroundStyle(tabManager.activeTab?.isSecure == true ? Color.secondary : Color.red)
                             Text(tabManager.activeTab?.url?.host ?? "검색 또는 주소 입력")
                                 .font(.system(size: 14)).foregroundStyle(.primary).lineLimit(1)
                         }
