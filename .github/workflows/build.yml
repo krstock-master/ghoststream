@@ -1,49 +1,54 @@
 name: Build GhostStream IPA
-
 on:
   push:
     branches: [main]
     tags: ['v*']
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
   build:
     name: Build IPA
     runs-on: macos-15
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Xcode
         run: |
           XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
-          echo "Using: $XCODE_PATH"
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
           xcodebuild -version
-          swift --version
 
       - name: Install xcodegen
         run: brew install xcodegen
 
-      - name: Generate Xcode project
+      - name: Generate project
         run: |
           xcodegen generate
-          echo "Schemes:"
+          echo "=== Generated project ==="
           xcodebuild -list -project GhostStream.xcodeproj
 
-      - name: Verify Info.plist
+      - name: Inject Info.plist into project
         run: |
-          echo "=== Check INFOPLIST_FILE setting ==="
-          xcodebuild -showBuildSettings -project GhostStream.xcodeproj -scheme GhostStream 2>/dev/null | grep INFOPLIST
+          # xcodegen ignores our plist, so we force it into the project
+          PBXPROJ="GhostStream.xcodeproj/project.pbxproj"
+          
+          # Replace the auto-generated INFOPLIST_FILE with our file
+          sed -i '' 's|GENERATE_INFOPLIST_FILE = YES|GENERATE_INFOPLIST_FILE = NO|g' "$PBXPROJ"
+          
+          # If there's an existing INFOPLIST_FILE, replace it; otherwise add it
+          if grep -q "INFOPLIST_FILE" "$PBXPROJ"; then
+            sed -i '' 's|INFOPLIST_FILE = "[^"]*"|INFOPLIST_FILE = "SupportFiles-Info.plist"|g' "$PBXPROJ"
+          else
+            sed -i '' 's|GENERATE_INFOPLIST_FILE = NO;|GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = "SupportFiles-Info.plist";|g' "$PBXPROJ"
+          fi
+          
+          echo "=== Verify pbxproj ==="
+          grep "INFOPLIST_FILE\|GENERATE_INFOPLIST" "$PBXPROJ" | head -10
           echo ""
-          echo "=== SupportFiles-Info.plist exists ==="
-          cat SupportFiles-Info.plist | head -20
-          echo "..."
+          echo "=== SupportFiles-Info.plist keys ==="
+          grep "<key>" SupportFiles-Info.plist
 
-      - name: Build for Simulator
+      - name: Build Simulator
         run: |
           set -o pipefail
           xcodebuild build \
@@ -55,19 +60,15 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             ONLY_ACTIVE_ARCH=NO \
+            INFOPLIST_FILE="$(pwd)/SupportFiles-Info.plist" \
+            GENERATE_INFOPLIST_FILE=NO \
             2>&1 | tee build.log
-          echo "Build succeeded"
 
-      - name: Show build errors if failed
+      - name: Show errors
         if: failure()
-        run: |
-          echo "=== COMPILATION ERRORS ==="
-          grep -A2 "error:" build.log || echo "No error lines found"
-          echo ""
-          echo "=== LAST 100 LINES ==="
-          tail -100 build.log
+        run: grep -A2 "error:" build.log 2>/dev/null | head -20
 
-      - name: Archive for Release
+      - name: Archive
         run: |
           set -o pipefail
           xcodebuild archive \
@@ -81,23 +82,25 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="" \
             ONLY_ACTIVE_ARCH=NO \
+            INFOPLIST_FILE="$(pwd)/SupportFiles-Info.plist" \
+            GENERATE_INFOPLIST_FILE=NO \
             2>&1 | tee archive.log
-          echo "Archive succeeded"
 
-      - name: Show archive errors if failed
-        if: failure()
+      - name: Verify IPA Info.plist
         run: |
-          echo "=== ARCHIVE ERRORS ==="
-          grep -A2 "error:" archive.log 2>/dev/null || echo "No archive log"
-          echo ""
-          echo "=== LAST 100 LINES ==="
-          tail -100 archive.log 2>/dev/null || true
+          PLIST=$(find build/GhostStream.xcarchive -name "Info.plist" -path "*/GhostStream.app/*" | head -1)
+          echo "=== Info.plist in archive ==="
+          if [ -n "$PLIST" ]; then
+            plutil -p "$PLIST"
+          else
+            echo "ERROR: No Info.plist found in archive!"
+            find build/GhostStream.xcarchive -name "Info.plist" | head -5
+          fi
 
       - name: Package IPA
         run: |
           mkdir -p build/Payload
           APP_PATH=$(find build/GhostStream.xcarchive -name "*.app" -type d | head -1)
-          echo "App: $APP_PATH"
           cp -r "$APP_PATH" build/Payload/
           cd build && zip -r GhostStream.ipa Payload/
           echo "IPA: $(ls -lh GhostStream.ipa | awk '{print $5}')"
@@ -123,7 +126,4 @@ jobs:
       - uses: softprops/action-gh-release@v1
         with:
           files: GhostStream.ipa
-          body: |
-            ## GhostStream ${{ github.ref_name }}
-            Download and install with SideStore / TrollStore / Sideloadly.
           generate_release_notes: true

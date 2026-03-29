@@ -49,7 +49,3 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ghoststream.browser
         PRODUCT_NAME: "GhostStream"
-        INFOPLIST_FILE: "SupportFiles-Info.plist"
-        GENERATE_INFOPLIST_FILE: NO
-    info:
-      path: SupportFiles-Info.plist
