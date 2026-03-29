@@ -5,6 +5,7 @@ import Foundation
 import UIKit
 import Security
 import CommonCrypto
+import MachO
 
 // MARK: - Jailbreak Detection
 enum JailbreakDetector {
