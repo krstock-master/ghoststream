@@ -90,7 +90,7 @@ struct OnboardingView: View {
         VStack(spacing: 24) {
             Spacer()
 
-            featureIcon("arrow.down.circle.fill", color: .tealAlt)
+            featureIcon("arrow.down.circle.fill", color: .purple)
 
             Text("모든 미디어 다운로드")
                 .font(.title2.bold())
