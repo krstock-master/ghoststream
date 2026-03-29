@@ -150,7 +150,7 @@ struct BrowserContainerView: View {
             Button { showTabGrid = true } label: {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: "square.on.square").font(.system(size: 18)).foregroundStyle(.white)
-                        .frame(maxWidth: .infinity, height: 40)
+                        .frame(maxWidth: .infinity).frame(height: 40)
                     if tabManager.tabs.count > 1 {
                         Text("\(tabManager.tabs.count)").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
                             .frame(width: 16, height: 16).background(GhostTheme.accent, in: Circle()).offset(x: -12, y: 2)
@@ -164,7 +164,7 @@ struct BrowserContainerView: View {
     private func tbtn(_ icon: String, _ on: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon).font(.system(size: 18)).foregroundStyle(on ? .white : .white.opacity(0.3))
-                .frame(maxWidth: .infinity, height: 40)
+                .frame(maxWidth: .infinity).frame(height: 40)
         }.disabled(!on)
     }
 
