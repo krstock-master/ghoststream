@@ -17,48 +17,50 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Show available Xcode versions
-        run: |
-          ls /Applications/ | grep Xcode
-          xcodebuild -version
-          swift --version
-
-      - name: Select latest Xcode
+      - name: Setup Xcode
         run: |
           XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
           echo "Using: $XCODE_PATH"
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
           xcodebuild -version
+          swift --version
 
       - name: Install xcodegen
         run: brew install xcodegen
 
       - name: Generate Xcode project
-        run: xcodegen generate
-
-      - name: List generated project
         run: |
-          ls -la *.xcodeproj/ 2>/dev/null || echo "No xcodeproj found"
-          xcodebuild -list -project GhostStream.xcodeproj 2>/dev/null || true
+          xcodegen generate
+          echo "Schemes:"
+          xcodebuild -list -project GhostStream.xcodeproj
 
       - name: Build for Simulator
         run: |
-          DEST=$(xcodebuild -showdestinations -scheme GhostStream -project GhostStream.xcodeproj 2>/dev/null | grep "iPhone" | head -1 | sed 's/.*{ //' | sed 's/ }$//')
-          echo "Destination: $DEST"
-          
+          set -o pipefail
           xcodebuild build \
             -project GhostStream.xcodeproj \
             -scheme GhostStream \
-            -destination "platform=iOS Simulator,name=iPhone 16" \
+            -destination "platform=iOS Simulator,name=iPhone 16,OS=latest" \
             -configuration Debug \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             ONLY_ACTIVE_ARCH=NO \
-            2>&1 | tail -50
+            2>&1 | tee build.log
+          echo "Build succeeded"
 
-      - name: Build Release archive
+      - name: Show build errors if failed
+        if: failure()
         run: |
+          echo "=== COMPILATION ERRORS ==="
+          grep -A2 "error:" build.log || echo "No error lines found"
+          echo ""
+          echo "=== LAST 100 LINES ==="
+          tail -100 build.log
+
+      - name: Archive for Release
+        run: |
+          set -o pipefail
           xcodebuild archive \
             -project GhostStream.xcodeproj \
             -scheme GhostStream \
@@ -70,23 +72,26 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="" \
             ONLY_ACTIVE_ARCH=NO \
-            2>&1 | tail -50
+            2>&1 | tee archive.log
+          echo "Archive succeeded"
+
+      - name: Show archive errors if failed
+        if: failure()
+        run: |
+          echo "=== ARCHIVE ERRORS ==="
+          grep -A2 "error:" archive.log 2>/dev/null || echo "No archive log"
+          echo ""
+          echo "=== LAST 100 LINES ==="
+          tail -100 archive.log 2>/dev/null || true
 
       - name: Package IPA
         run: |
           mkdir -p build/Payload
           APP_PATH=$(find build/GhostStream.xcarchive -name "*.app" -type d | head -1)
-          echo "App found at: $APP_PATH"
-          
-          if [ -z "$APP_PATH" ]; then
-            echo "ERROR: No .app found in archive"
-            find build/GhostStream.xcarchive -type d | head -20
-            exit 1
-          fi
-          
+          echo "App: $APP_PATH"
           cp -r "$APP_PATH" build/Payload/
           cd build && zip -r GhostStream.ipa Payload/
-          echo "IPA size: $(ls -lh GhostStream.ipa | awk '{print $5}')"
+          echo "IPA: $(ls -lh GhostStream.ipa | awk '{print $5}')"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
@@ -95,17 +100,6 @@ jobs:
           path: build/GhostStream.ipa
           retention-days: 90
 
-      - name: Summary
-        if: always()
-        run: |
-          echo "## Build Result" >> $GITHUB_STEP_SUMMARY
-          if [ -f build/GhostStream.ipa ]; then
-            echo "IPA built successfully" >> $GITHUB_STEP_SUMMARY
-            echo "Size: $(ls -lh build/GhostStream.ipa | awk '{print $5}')" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "Build failed - check logs above" >> $GITHUB_STEP_SUMMARY
-          fi
-
   release:
     name: Create Release
     needs: build
@@ -113,19 +107,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
-      - name: Download IPA
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: GhostStream-IPA
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - uses: softprops/action-gh-release@v1
         with:
           files: GhostStream.ipa
           body: |
             ## GhostStream ${{ github.ref_name }}
-            
-            Download GhostStream.ipa and install with SideStore, TrollStore, or Sideloadly.
+            Download and install with SideStore / TrollStore / Sideloadly.
           generate_release_notes: true

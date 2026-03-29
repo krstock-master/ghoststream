@@ -2,7 +2,7 @@ name: GhostStream
 options:
   bundleIdPrefix: com.ghoststream
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
   generateEmptyDirectories: true
   createIntermediateGroups: true
 
