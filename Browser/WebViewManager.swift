@@ -123,10 +123,8 @@ enum WebViewConfigurator {
         }
         uc.addUserScript(WKUserScript(source: Self.mediaDetectorJS, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         config.userContentController = uc
-        // Apply content blocking rules
-        Task { @MainActor in
-            await privacyEngine.contentBlocker.applyRules(to: uc)
-        }
+        // Apply content blocking rules (cached from startup)
+        privacyEngine.contentBlocker.applyCachedRules(to: uc)
         return config
     }
 

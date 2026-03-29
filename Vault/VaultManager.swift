@@ -17,7 +17,7 @@ final class VaultManager: @unchecked Sendable {
 
     private var vaultDirectory: URL {
         guard let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            fatalError("Documents directory unavailable")
+            return FileManager.default.temporaryDirectory.appendingPathComponent(".vault")
         }
         let dir = documentsDir.appendingPathComponent(".vault", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -104,7 +104,8 @@ final class VaultManager: @unchecked Sendable {
         let plainData = try AES.GCM.open(sealedBox, using: key)
 
         let ext = (item.originalName as NSString).pathExtension
-        let tmpURL = FileManager.default.temporaryDirectory
+        let tmpDir = FileManager.default.temporaryDirectory
+        let tmpURL = tmpDir
             .appendingPathComponent("vault_\(item.id).\(ext.isEmpty ? "mp4" : ext)")
         try plainData.write(to: tmpURL)
         return tmpURL

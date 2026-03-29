@@ -66,6 +66,13 @@ final class ContentBlockerManager: @unchecked Sendable {
         }
     }
 
+    /// Synchronously apply cached rules (call after initial compile)
+    func applyCachedRules(to controller: WKUserContentController) {
+        if let ruleList = compiledRuleList {
+            controller.add(ruleList)
+        }
+    }
+
     // MARK: - Background Update
 
     func scheduleBackgroundUpdate() {

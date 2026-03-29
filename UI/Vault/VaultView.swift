@@ -41,16 +41,19 @@ struct VaultView: View {
             } message: { Text("이 파일을 삭제하시겠습니까?") }
             .alert("오류", isPresented: $showError) { Button("확인") {} } message: { Text(errorMessage ?? "") }
             .fullScreenCover(isPresented: $showPlayer) {
-                if let url = playerURL {
-                    ZStack(alignment: .topTrailing) {
+                ZStack(alignment: .topTrailing) {
+                    if let url = playerURL {
                         VideoPlayer(player: AVPlayer(url: url))
                             .ignoresSafeArea()
-                        Button { showPlayer = false } label: {
-                            Image(systemName: "xmark.circle.fill").font(.title).foregroundStyle(.white)
-                                .padding()
-                        }
-                    }.background(Color.black)
-                }
+                    } else {
+                        Color.black.ignoresSafeArea()
+                        Text("파일을 불러올 수 없습니다").foregroundStyle(.white)
+                    }
+                    Button { showPlayer = false; playerURL = nil } label: {
+                        Image(systemName: "xmark.circle.fill").font(.title).foregroundStyle(.white)
+                            .padding()
+                    }
+                }.background(Color.black.ignoresSafeArea())
             }
         }
     }
@@ -112,13 +115,15 @@ struct VaultView: View {
             Task {
                 do {
                     let url = try await vault.decrypt(item: item)
-                    if item.mediaType == .video {
+                    await MainActor.run {
                         playerURL = url
                         showPlayer = true
                     }
                 } catch {
-                    errorMessage = "파일 열기 실패: \(error.localizedDescription)"
-                    showError = true
+                    await MainActor.run {
+                        errorMessage = "파일 열기 실패: \(error.localizedDescription)"
+                        showError = true
+                    }
                 }
             }
         } label: {

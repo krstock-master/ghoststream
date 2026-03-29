@@ -168,7 +168,7 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
 
     static var downloadDirectory: URL {
         guard let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            fatalError("Documents directory unavailable")
+            return FileManager.default.temporaryDirectory.appendingPathComponent("Downloads")
         }
         let dir = documentsDir.appendingPathComponent("Downloads", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -189,6 +189,9 @@ extension MediaDownloadManager: URLSessionDownloadDelegate {
         let dest = Self.downloadDirectory.appendingPathComponent(fileName)
 
         do {
+            if FileManager.default.fileExists(atPath: dest.path) {
+                try FileManager.default.removeItem(at: dest)
+            }
             try FileManager.default.moveItem(at: location, to: dest)
             dl.localURL = dest
             dl.state = .completed
