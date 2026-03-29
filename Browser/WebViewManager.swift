@@ -281,7 +281,7 @@ enum WebViewConfigurator {
     document.addEventListener('contextmenu',function(e){
         var el=e.target;
         if(el.tagName==='IMG'&&el.src){
-            window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:el.src,type:el.src.match(/\.gif(\\?|$)/i)?'gif':'image',label:'Image'}],title:el.alt||document.title,referer:location.href,thumb:null});
+            window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:el.src,type:el.src.toLowerCase().indexOf('.gif')!==-1?'gif':'image',label:'Image'}],title:el.alt||document.title,referer:location.href,thumb:null});
         }
         if(el.tagName==='VIDEO'||(el.closest&&el.closest('video'))){
             var v=el.tagName==='VIDEO'?el:el.closest('video');
