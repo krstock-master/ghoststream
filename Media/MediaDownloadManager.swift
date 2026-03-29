@@ -232,28 +232,75 @@ extension MediaDownloadManager: AVAssetDownloadDelegate {
                     didFinishDownloadingTo location: URL) {
         guard let dl = find(byTaskID: assetDownloadTask.taskIdentifier) else { return }
 
-        // Move .movpkg to Documents/Downloads for permanent storage
+        // Stage 1: move .movpkg to persistent storage
         let destDir = Self.downloadDirectory
-        let filename = "\(dl.media.title.prefix(40))_\(Int(Date().timeIntervalSince1970)).movpkg"
+        let safeName = "\(dl.media.title.prefix(40))_\(Int(Date().timeIntervalSince1970))"
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: " ", with: "_")
-        let dest = destDir.appendingPathComponent(filename)
+        let movpkgDest = destDir.appendingPathComponent("\(safeName).movpkg")
 
         do {
-            if FileManager.default.fileExists(atPath: dest.path) {
-                try FileManager.default.removeItem(at: dest)
+            if FileManager.default.fileExists(atPath: movpkgDest.path) {
+                try FileManager.default.removeItem(at: movpkgDest)
             }
-            try FileManager.default.moveItem(at: location, to: dest)
-            dl.localURL = dest
+            try FileManager.default.moveItem(at: location, to: movpkgDest)
         } catch {
-            // Fallback: use original location
+            // Fallback: use original temp location
             dl.localURL = location
+            dl.state = .completed
+            dl.progress = 1.0
+            DispatchQueue.main.async { self.completedDownloads.insert(dl, at: 0) }
+            return
         }
 
-        dl.state = .completed
-        dl.progress = 1.0
-        DispatchQueue.main.async {
-            self.completedDownloads.insert(dl, at: 0)
+        // Stage 2: export .movpkg → .mp4 (so it's playable & gallery-saveable)
+        dl.state = .converting
+        exportToMP4(from: movpkgDest, safeName: safeName, dl: dl)
+    }
+
+    // MARK: HLS → MP4 export
+    private func exportToMP4(from movpkgURL: URL, safeName: String, dl: MediaDownload) {
+        let asset = AVURLAsset(url: movpkgURL)
+        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+            // AVAssetExportSession unavailable – keep .movpkg as-is
+            dl.localURL = movpkgURL
+            dl.hlsConversionStatus = "MP4 변환 불가 (movpkg로 저장)"
+            dl.state = .completed
+            dl.progress = 1.0
+            DispatchQueue.main.async { self.completedDownloads.insert(dl, at: 0) }
+            return
+        }
+
+        let mp4URL = Self.downloadDirectory.appendingPathComponent("\(safeName).mp4")
+        if FileManager.default.fileExists(atPath: mp4URL.path) {
+            try? FileManager.default.removeItem(at: mp4URL)
+        }
+
+        exportSession.outputURL = mp4URL
+        exportSession.outputFileType = .mp4
+        exportSession.shouldOptimizeForNetworkUse = true
+
+        exportSession.exportAsynchronously {
+            DispatchQueue.main.async {
+                if exportSession.status == .completed {
+                    // Clean up .movpkg now that MP4 exists
+                    try? FileManager.default.removeItem(at: movpkgURL)
+                    dl.localURL = mp4URL
+                    dl.hlsConversionStatus = "MP4 변환 완료"
+                } else {
+                    // Keep .movpkg as fallback
+                    dl.localURL = movpkgURL
+                    dl.hlsConversionStatus = "MP4 변환 실패 – movpkg로 저장됨"
+                }
+                dl.state = .completed
+                dl.progress = 1.0
+                self.completedDownloads.insert(dl, at: 0)
+                NotificationCenter.default.post(name: .downloadCompleted, object: dl.media.title)
+
+                if dl.saveToVault, let url = dl.localURL {
+                    Task { await self.moveToVault(dl) }
+                }
+            }
         }
     }
 
@@ -290,7 +337,12 @@ final class MediaDownload: Identifiable, @unchecked Sendable {
         self.saveToVault = saveToVault
     }
 
-    var formattedProgress: String { "\(Int(progress * 100))%" }
+    var hlsConversionStatus: String?
+
+    var formattedProgress: String {
+        if state == .converting { return "변환 중..." }
+        return "\(Int(progress * 100))%"
+    }
     var formattedSpeed: String {
         let elapsed = Date.now.timeIntervalSince(startDate)
         guard elapsed > 0, bytesDownloaded > 0 else { return "--" }
@@ -298,6 +350,6 @@ final class MediaDownload: Identifiable, @unchecked Sendable {
     }
 
     enum DownloadState: String {
-        case pending, downloading, paused, completed, failed, cancelled
+        case pending, downloading, paused, converting, completed, failed, cancelled
     }
 }

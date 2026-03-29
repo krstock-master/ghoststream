@@ -56,15 +56,23 @@ struct DownloadsManagerView: View {
         ForEach(dm.downloads) { dl in
             VStack(spacing: 8) {
                 HStack {
-                    Image(systemName: "arrow.down.circle").foregroundStyle(.teal).frame(width: 28)
+                    Image(systemName: dl.state == .converting ? "arrow.triangle.2.circlepath" : "arrow.down.circle")
+                        .foregroundStyle(dl.state == .converting ? .orange : .teal)
+                        .frame(width: 28)
+                        .symbolEffect(.rotate, isActive: dl.state == .converting)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(dl.media.title).font(.subheadline).lineLimit(1)
-                        Text("\(dl.formattedProgress) · \(dl.media.type.rawValue)").font(.caption).foregroundStyle(.secondary)
+                        Text("\(dl.state == .converting ? "MP4 변환 중..." : dl.formattedProgress) · \(dl.media.type.rawValue)")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text(dl.formattedSpeed).font(.caption2.monospacedDigit()).foregroundStyle(.teal)
+                    if dl.state == .converting {
+                        ProgressView().scaleEffect(0.7)
+                    } else {
+                        Text(dl.formattedSpeed).font(.caption2.monospacedDigit()).foregroundStyle(.teal)
+                    }
                 }
-                ProgressView(value: dl.progress).tint(.teal)
+                ProgressView(value: dl.state == .converting ? nil : dl.progress).tint(dl.state == .converting ? .orange : .teal)
             }
             .padding(12).background(Color(.secondarySystemGroupedBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
         }

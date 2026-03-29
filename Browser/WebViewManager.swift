@@ -30,6 +30,26 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 w.evaluateJavaScript("var s=document.createElement('style');s.textContent='\(css)';document.head.appendChild(s);")
             }
         }
+
+        // ── Fix 3: Cloudflare challenge detection ──────────────────────────────
+        // If CF is spoofing our fingerprint and looping, set a bypass flag in
+        // sessionStorage so that on the next reload the fingerprint defense JS
+        // exits immediately and CF gets a real browser fingerprint.
+        w.evaluateJavaScript("""
+        (function(){
+            var isCF = document.title === 'Just a moment...'
+                || document.title.includes('Checking your browser')
+                || document.title.includes('Attention Required')
+                || !!document.querySelector('#challenge-form, .cf-browser-verification, #cf-wrapper, [data-translate="checking_browser"]')
+                || (location.hostname === 'challenges.cloudflare.com');
+            return isCF ? '1' : '0';
+        })()
+        """) { [weak w] result, _ in
+            guard let str = result as? String, str == "1" else { return }
+            // Set bypass flag then reload so fingerprintDefenseJS skips spoofing
+            w?.evaluateJavaScript("try { sessionStorage.setItem('__gs_cf_bypass','1'); } catch(e) {}")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { w?.reload() }
+        }
     }
     func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
     func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
@@ -135,14 +155,25 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             }
         case "alohaDownload":
             guard let urlStr = dict["url"] as? String, let url = URL(string: urlStr) else { return }
+            // Hide overlay signal from webkitendfullscreen
+            if urlStr == "__hide_overlay__" { FullscreenDownloadOverlay.shared.hide(); return }
             let type: DetectedMedia.MediaType = urlStr.contains(".m3u8") ? .hls : .mp4
             let title = (dict["title"] as? String) ?? url.deletingPathExtension().lastPathComponent
             let quality = (dict["quality"] as? String) ?? "Auto"
+            let isFullscreen = (dict["fullscreen"] as? Bool) == true
             let media = DetectedMedia(url: url, type: type, quality: quality, title: title,
                 referer: tab.url?.absoluteString ?? "", thumbnail: nil, estimatedSize: nil)
-            // Immediately start download (Aloha-style: 1-tap download)
-            downloadManager?.download(media: media, saveToVault: false)
-            onMediaDetected(media)
+            if isFullscreen {
+                // Show native overlay button instead of auto-downloading
+                // (user sees button and consciously taps to download)
+                if let dm = downloadManager {
+                    FullscreenDownloadOverlay.shared.show(url: url, title: title, quality: quality, downloadManager: dm)
+                }
+            } else {
+                // Normal Aloha-style: 1-tap download from overlay button
+                downloadManager?.download(media: media, saveToVault: false)
+                onMediaDetected(media)
+            }
         case "blobCapture":
             guard let dataURL = dict["data"] as? String, let mime = dict["mimeType"] as? String,
                   let range = dataURL.range(of: ","), let data = Data(base64Encoded: String(dataURL[range.upperBound...])) else { return }
@@ -240,8 +271,9 @@ enum WebViewConfigurator {
             setTimeout(function(){b.innerHTML='<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 19h14" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';},2000);}};
         b.ontouchend=function(e){e.stopPropagation();};
         w.appendChild(b);
-        v.addEventListener('webkitbeginfullscreen',function(){var src=v.currentSrc||v.src;if(src)window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p'});});
-        v.addEventListener('webkitpresentationmodechanged',function(e){if(v.webkitPresentationMode==='fullscreen'){var src=v.currentSrc||v.src;if(src)window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p'});}});
+        v.addEventListener('webkitbeginfullscreen',function(){var src=v.currentSrc||v.src;if(src)window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p',fullscreen:true});});
+        v.addEventListener('webkitendfullscreen',function(){window.webkit.messageHandlers.alohaDownload.postMessage({url:'__hide_overlay__',title:'',quality:'',fullscreen:false});});
+        v.addEventListener('webkitpresentationmodechanged',function(e){if(v.webkitPresentationMode==='fullscreen'){var src=v.currentSrc||v.src;if(src)window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p',fullscreen:true});}});
         v.addEventListener('play',function(){if(!v.dataset.gsPlayed){v.dataset.gsPlayed='1';var src=v.currentSrc||v.src;if(src){window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:src,type:src.includes('.m3u8')?'hls':'mp4',label:(v.videoHeight||'Auto')+'p'}],title:document.title,referer:location.href,thumb:v.poster||null});}}});
     }
 
@@ -252,8 +284,9 @@ enum WebViewConfigurator {
             v.querySelectorAll('source').forEach(function(src){if(src.src)s.push({url:src.src,type:src.src.includes('.m3u8')?'hls':'mp4',label:src.getAttribute('label')||'default'});});
             if(s.length)window.webkit.messageHandlers.mediaFound.postMessage({sources:s,title:document.title,referer:location.href,thumb:v.poster||null});
         });
-        document.querySelectorAll('img').forEach(function(img){var src=img.src||'';
-            var isGif=el.src.toLowerCase().indexOf('.gif')!==-1;window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:el.src,type:isGif?'gif':'image',label:'Image'}],title:el.alt||document.title,referer:location.href,thumb:null});
+        document.querySelectorAll('img').forEach(function(img){if(!img.src||img.src.startsWith('data:'))return;
+            var isGif=img.src.toLowerCase().indexOf('.gif')!==-1;
+            if(img.naturalWidth>100||isGif)window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:img.src,type:isGif?'gif':'image',label:'Image'}],title:img.alt||document.title,referer:location.href,thumb:null});
         });
         if(typeof jwplayer!=='undefined'){document.querySelectorAll('[id]').forEach(function(el){try{var p=jwplayer(el.id);if(!p||!p.getState)return;
             function ex(){var it=p.getPlaylistItem()||{};var ss=(it.sources||[]).map(function(s){return{url:s.file,type:s.file&&s.file.includes('.m3u8')?'hls':'mp4',label:s.label||'default'};});

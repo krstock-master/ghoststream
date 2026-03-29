@@ -29,6 +29,19 @@ final class PrivacyEngine: @unchecked Sendable {
     (function() {
         "use strict";
         
+        // ── Cloudflare bypass: if CF challenge page set a bypass flag,
+        //    skip ALL fingerprint spoofing so CF sees a real browser profile.
+        try {
+            if (sessionStorage.getItem('__gs_cf_bypass') === '1') {
+                sessionStorage.removeItem('__gs_cf_bypass');
+                return; // exit immediately – no spoofing on CF pages
+            }
+        } catch(e) {}
+        
+        // Also skip on known CF challenge domains
+        var _host = location.hostname;
+        if (_host === 'challenges.cloudflare.com' || _host === 'cloudflare.com') return;
+        
         function notifyNative(event) {
             try {
                 window.webkit.messageHandlers.privacyEvent.postMessage({ event: event });

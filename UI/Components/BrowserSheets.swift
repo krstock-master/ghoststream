@@ -54,47 +54,242 @@ struct PrivacyReportSheet: View {
 struct TabGridView: View {
     @Environment(TabManager.self) private var tabManager
     @Environment(\.dismiss) private var dismiss
+
+    // Samsung-style: 2-col cards with large preview area
+    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                    ForEach(tabManager.tabs) { tab in
-                        VStack(spacing: 0) {
-                            ZStack(alignment: .topTrailing) {
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(tab.isPrivate ? .purple.opacity(0.1) : .white.opacity(0.05))
-                                    .frame(height: 120)
-                                    .overlay {
-                                        VStack {
-                                            Image(systemName: tab.isPrivate ? "lock.fill" : "globe").font(.title2)
-                                                .foregroundStyle(tab.isPrivate ? .purple : Color.gray)
-                                            Text(tab.displayTitle).font(.caption2).foregroundStyle(Color.gray).lineLimit(1).padding(.horizontal, 4)
-                                        }
-                                    }
-                                Button { tabManager.closeTab(tab) } label: {
-                                    Image(systemName: "xmark.circle.fill").font(.body).foregroundStyle(Color.gray)
-                                }.padding(6)
+            VStack(spacing: 0) {
+                // ── Header ───────────────────────────────────────────────
+                tabHeader
+
+                // ── Tab Grid ─────────────────────────────────────────────
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        ForEach(tabManager.tabs) { tab in
+                            SamsungTabCard(tab: tab, isActive: tab.id == tabManager.activeTabID) {
+                                tabManager.switchTo(tab)
+                                dismiss()
+                            } onClose: {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                                    tabManager.closeTab(tab)
+                                }
                             }
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(tab.id == tabManager.activeTabID ? .teal : .clear, lineWidth: 2))
                         }
-                        .onTapGesture { tabManager.switchTo(tab); dismiss() }
                     }
-                }.padding()
+                    .padding(.horizontal, 14)
+                    .padding(.top, 12)
+                    .padding(.bottom, 100)
+                }
+
+                // ── Bottom Action Bar ─────────────────────────────────────
+                tabBottomBar
             }
-            .background(Color(.systemBackground))
-            .navigationTitle("탭 (\(tabManager.tabs.count))").navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("모두 닫기") { tabManager.closeAllTabs(); dismiss() }.font(.caption).foregroundStyle(.red)
+            .background(Color(.systemGroupedBackground))
+            .navigationBarHidden(true)
+        }
+    }
+
+    // MARK: - Header
+    private var tabHeader: some View {
+        HStack(spacing: 0) {
+            Button("완료") { dismiss() }
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.teal)
+                .padding(.leading, 18)
+
+            Spacer()
+
+            VStack(spacing: 1) {
+                Text("탭")
+                    .font(.system(size: 16, weight: .semibold))
+                Text("\(tabManager.tabs.count)개 열림")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    tabManager.closeAllTabs()
                 }
-                ToolbarItem(placement: .topBarTrailing) { Button("완료") { dismiss() }.foregroundStyle(.teal) }
-                ToolbarItem(placement: .bottomBar) {
-                    HStack {
-                        Button { tabManager.newTab(); dismiss() } label: { Label("새 탭", systemImage: "plus") }
+                dismiss()
+            } label: {
+                Text("모두 닫기")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.red)
+            }
+            .padding(.trailing, 18)
+        }
+        .padding(.vertical, 14)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
+    // MARK: - Bottom Bar
+    private var tabBottomBar: some View {
+        HStack(spacing: 0) {
+            // Private tab
+            Button {
+                tabManager.newTab(isPrivate: true)
+                dismiss()
+            } label: {
+                VStack(spacing: 4) {
+                    Image(systemName: "lock.square.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.purple)
+                    Text("프라이빗")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.purple)
+                }
+                .frame(maxWidth: .infinity)
+            }
+
+            // New tab (centre, prominent)
+            Button {
+                tabManager.newTab()
+                dismiss()
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(.teal)
+                        .frame(width: 52, height: 52)
+                        .shadow(color: .teal.opacity(0.45), radius: 10, y: 4)
+                    Image(systemName: "plus")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            // Placeholder for symmetry (or add bookmark later)
+            Button {
+                // Reserved: Tab groups / bookmarks Phase 2
+            } label: {
+                VStack(spacing: 4) {
+                    Image(systemName: "square.on.square")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.secondary)
+                    Text("그룹")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .disabled(true)
+        }
+        .padding(.vertical, 10)
+        .padding(.bottom, 8)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) { Divider() }
+    }
+}
+
+// MARK: - Samsung-Style Tab Card
+struct SamsungTabCard: View {
+    let tab: Tab
+    let isActive: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+
+    @State private var pressing = false
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            // Card body
+            Button(action: onSelect) {
+                VStack(spacing: 0) {
+                    // ── Preview area ──────────────────────────────────────
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 0)
+                            .fill(tab.isPrivate
+                                  ? Color.purple.opacity(0.08)
+                                  : Color(.secondarySystemGroupedBackground))
+                            .frame(height: 130)
+
+                        // Site favicon / icon
+                        VStack(spacing: 10) {
+                            ZStack {
+                                Circle()
+                                    .fill(tab.isPrivate ? Color.purple.opacity(0.15) : Color(.tertiarySystemFill))
+                                    .frame(width: 48, height: 48)
+                                Image(systemName: tab.isPrivate ? "lock.fill" : "globe")
+                                    .font(.system(size: 20, weight: .medium))
+                                    .foregroundStyle(tab.isPrivate ? Color.purple : Color.teal)
+                            }
+                            Text(tab.displayTitle)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .padding(.horizontal, 8)
+                        }
+                    }
+
+                    // ── URL bar strip ─────────────────────────────────────
+                    HStack(spacing: 6) {
+                        Image(systemName: tab.isSecure ? "lock.fill" : "globe")
+                            .font(.system(size: 10))
+                            .foregroundStyle(tab.isSecure ? Color.green : Color.secondary)
+                        Text(tab.url?.host ?? tab.displayTitle)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
                         Spacer()
-                        Button { tabManager.newTab(isPrivate: true); dismiss() } label: { Label("프라이빗", systemImage: "lock") }
-                    }.foregroundStyle(.teal)
+                        if tab.isPrivate {
+                            Image(systemName: "lock.shield.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.purple)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color(.systemBackground))
                 }
+            }
+            .buttonStyle(.plain)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(
+                        isActive ? Color.teal : Color(.separator).opacity(0.5),
+                        lineWidth: isActive ? 2 : 0.5
+                    )
+            )
+            .shadow(color: Color.black.opacity(isActive ? 0.18 : 0.07), radius: isActive ? 8 : 3, y: 2)
+            .scaleEffect(pressing ? 0.96 : 1.0)
+            .animation(.spring(response: 0.25, dampingFraction: 0.8), value: pressing)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in pressing = true }
+                    .onEnded { _ in pressing = false }
+            )
+
+            // ── Close button ──────────────────────────────────────────
+            Button(action: onClose) {
+                ZStack {
+                    Circle()
+                        .fill(Color(.systemBackground))
+                        .frame(width: 22, height: 22)
+                        .shadow(color: .black.opacity(0.15), radius: 3)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .offset(x: 6, y: -6)
+
+            // ── Active indicator ──────────────────────────────────────
+            if isActive {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.teal)
+                    .background(Circle().fill(Color(.systemBackground)).padding(2))
+                    .offset(x: -8, y: -8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
         }
     }
