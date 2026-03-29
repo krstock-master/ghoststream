@@ -34,6 +34,15 @@ jobs:
           echo "Schemes:"
           xcodebuild -list -project GhostStream.xcodeproj
 
+      - name: Verify Info.plist
+        run: |
+          echo "=== Check INFOPLIST_FILE setting ==="
+          xcodebuild -showBuildSettings -project GhostStream.xcodeproj -scheme GhostStream 2>/dev/null | grep INFOPLIST
+          echo ""
+          echo "=== SupportFiles-Info.plist exists ==="
+          cat SupportFiles-Info.plist | head -20
+          echo "..."
+
       - name: Build for Simulator
         run: |
           set -o pipefail
