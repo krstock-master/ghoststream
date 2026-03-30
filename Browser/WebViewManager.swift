@@ -203,6 +203,20 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             syncCookiesToDownloadManager()
             downloadManager?.download(media: media2, saveToVault: false)
             onMediaDetected(media2)
+        case "downloadVideo":
+            guard let urlStr2 = dict["url"] as? String, let url2 = URL(string: urlStr2) else { return }
+            if url2.scheme == "blob" || url2.scheme == "data" {
+                NotificationCenter.default.post(name: .downloadFailed, object: "이 영상은 스트리밍 전용입니다 (blob/MediaSource)")
+                return
+            }
+            let type2: DetectedMedia.MediaType = urlStr2.contains(".m3u8") ? .hls : .mp4
+            let title2 = (dict["title"] as? String) ?? url2.deletingPathExtension().lastPathComponent
+            let quality2 = (dict["quality"] as? String) ?? "Auto"
+            let media2 = DetectedMedia(url: url2, type: type2, quality: quality2, title: title2,
+                referer: tab.url?.absoluteString ?? "", thumbnail: nil, estimatedSize: nil)
+            syncCookiesToDownloadManager()
+            downloadManager?.download(media: media2, saveToVault: false)
+            onMediaDetected(media2)
         case "alohaDownload":
             guard let urlStr = dict["url"] as? String, let url = URL(string: urlStr) else { return }
             // Hide overlay signal from webkitendfullscreen
@@ -285,20 +299,6 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
 
 // MARK: - Element Hider Store
 final class ElementHiderStore {
-    static let shared = ElementHiderStore()
-    private var store: [String: [String]] = [:]
-    init() {
-        if let d = UserDefaults.standard.data(forKey: "elementHiderRules"),
-           let s = try? JSONDecoder().decode([String:[String]].self, from: d) { store = s }
-    }
-    func addRule(_ sel: String, for host: String) {
-        var r = store[host] ?? []; if !r.contains(sel) { r.append(sel); store[host] = r; save() }
-    }
-    func rules(for host: String) -> [String] { store[host] ?? [] }
-    func clearRules(for host: String) { store.removeValue(forKey: host); save() }
-    private func save() { if let d = try? JSONEncoder().encode(store) { UserDefaults.standard.set(d, forKey: "elementHiderRules") } }
-}
-
 
 // MARK: - WebView Configuration
 enum WebViewConfigurator {
@@ -317,120 +317,198 @@ enum WebViewConfigurator {
         if let fp = privacyEngine.fingerprintDefenseScript {
             uc.addUserScript(WKUserScript(source: fp, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         }
-        // ★ Early injection: XHR/fetch interceptors (atDocumentStart, ALL frames)
         uc.addUserScript(WKUserScript(source: Self.earlyJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
-        // ★ Main injection: scan + UI buttons (atDocumentEnd, ALL frames)
         uc.addUserScript(WKUserScript(source: Self.mainJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
         config.userContentController = uc
         privacyEngine.contentBlocker.applyCachedRules(to: uc)
         return config
     }
 
-    // ════════════════════════════════════════════════════════════════
-    // EARLY JS (atDocumentStart) — intercept network requests ASAP
-    // ════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════
+    // EARLY JS — Network interceptors + Performance API (DevTools Network 탭 방식)
+    // ═══════════════════════════════════════════════════════════════
     static let earlyJS = """
     (function(){
     if(window.__gsE)return;window.__gsE=true;
     window.__gsURLs=window.__gsURLs||[];
+    window.__gsVideoURLs=window.__gsVideoURLs||[];
+
     function E(u,t,l,n){
         if(!u||u.startsWith('blob:')||u.startsWith('data:'))return;
+        // Resolve relative URLs
+        try{u=new URL(u,location.href).href;}catch(e){return;}
         if(window.__gsURLs.indexOf(u)!==-1)return;
         window.__gsURLs.push(u);
+        window.__gsVideoURLs.push({url:u,type:t||'mp4',label:l||'Auto',time:Date.now()});
         try{window.webkit.messageHandlers.mediaFound.postMessage({
             sources:[{url:u,type:t||'mp4',label:l||'Auto'}],
             title:n||document.title||'Media',referer:location.href,thumb:null
         });}catch(e){}
     }
+
+    // ★ Pattern matching for video URLs
+    var vidPat=/\\.(mp4|webm|m4v|mov|m3u8|ts|mpd)(\\?|#|$)/i;
+    var cdnPat=/videoplayback|googlevideo|fbcdn.*video|cdninstagram.*video|twimg.*video|pbs\\.twimg|video-.*akamai|cloudfront.*video|vod.*akamaized/i;
+    function isVideoURL(u){return vidPat.test(u)||cdnPat.test(u);}
+    function typeFromURL(u){
+        if(u.includes('.m3u8'))return 'hls';
+        if(u.includes('.mpd'))return 'dash';
+        if(u.includes('.ts')&&!u.includes('.tsinghua'))return 'ts';
+        return 'mp4';
+    }
+
+    // ★★ PERFORMANCE API — 브라우저가 실제로 로드한 모든 리소스 URL 캡처 ★★
+    // (DevTools Network 탭 → Media 필터와 동일한 원리)
+    try{
+        var perfObs=new PerformanceObserver(function(list){
+            list.getEntries().forEach(function(entry){
+                var u=entry.name;
+                if(isVideoURL(u)){
+                    E(u,typeFromURL(u),'Network:'+entry.initiatorType);
+                }
+            });
+        });
+        perfObs.observe({entryTypes:['resource']});
+    }catch(e){}
+    // Also scan existing resources
+    try{
+        performance.getEntriesByType('resource').forEach(function(entry){
+            if(isVideoURL(entry.name)){
+                E(entry.name,typeFromURL(entry.name),'Loaded:'+entry.initiatorType);
+            }
+        });
+    }catch(e){}
+
+    // ★ XHR intercept
     var _xo=XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open=function(m,u){
-        if(typeof u==='string'){
-            if(u.includes('.m3u8'))E(u,'hls','HLS');
-            else if(u.match(/\\.(mp4|webm|m4v|mov)(\\?|$)/i))E(u,'mp4','XHR');
-            else if(u.includes('googlevideo.com/videoplayback'))E(u,'mp4','YouTube');
-        }
+        if(typeof u==='string'&&isVideoURL(u))E(u,typeFromURL(u),'XHR');
         return _xo.apply(this,arguments);
     };
+
+    // ★ Fetch intercept
     var _f=window.fetch;
     window.fetch=function(i){
         var u=typeof i==='string'?i:(i&&i.url?i.url:'');
-        if(u.includes('.m3u8'))E(u,'hls','HLS');
-        else if(u.match(/\\.(mp4|webm|m4v|mov)(\\?|$)/i))E(u,'mp4','Fetch');
-        else if(u.includes('googlevideo.com/videoplayback'))E(u,'mp4','YouTube');
+        if(isVideoURL(u))E(u,typeFromURL(u),'Fetch');
         return _f.apply(this,arguments);
     };
+
+    // ★ Blob URL intercept
     var _co=URL.createObjectURL.bind(URL);
     URL.createObjectURL=function(b){
         var u=_co(b);
-        if(b&&b.type&&b.type.startsWith('video/')){
+        if(b&&b.type&&(b.type.startsWith('video/')||b.type.startsWith('audio/'))){
             try{var r=new FileReader();r.onload=function(e){
                 try{window.webkit.messageHandlers.blobCapture.postMessage({data:e.target.result,mimeType:b.type});}catch(x){}
             };r.readAsDataURL(b.slice(0,50*1024*1024));}catch(e){}
         }
         return u;
     };
+
+    // ★ HTMLMediaElement.src setter intercept — catch programmatic src changes
+    try{
+        var srcDesc=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'src');
+        if(srcDesc&&srcDesc.set){
+            var origSet=srcDesc.set;
+            Object.defineProperty(HTMLMediaElement.prototype,'src',{
+                set:function(v){
+                    if(v&&typeof v==='string'&&!v.startsWith('blob:')&&!v.startsWith('data:')){
+                        if(isVideoURL(v))E(v,typeFromURL(v),'SrcSet');
+                    }
+                    return origSet.call(this,v);
+                },
+                get:srcDesc.get,
+                configurable:true
+            });
+        }
+    }catch(e){}
     })();
     """
 
-    // ════════════════════════════════════════════════════════════════
-    // MAIN JS (atDocumentEnd) — UI, scan, fullscreen bar
-    // ════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════
+    // MAIN JS — UI buttons, fullscreen bar, scanner
+    // ═══════════════════════════════════════════════════════════════
     static let mainJS = """
     (function(){
     if(window.__gsM)return;window.__gsM=true;
     window.__gsURLs=window.__gsURLs||[];
+    window.__gsVideoURLs=window.__gsVideoURLs||[];
 
     function E(u,t,l,n){
         if(!u||u.startsWith('blob:')||u.startsWith('data:'))return;
+        try{u=new URL(u,location.href).href;}catch(e){return;}
         if(window.__gsURLs.indexOf(u)!==-1)return;
         window.__gsURLs.push(u);
+        window.__gsVideoURLs.push({url:u,type:t||'mp4',label:l||'Auto',time:Date.now()});
         try{window.webkit.messageHandlers.mediaFound.postMessage({
             sources:[{url:u,type:t||'mp4',label:l||'Auto'}],
             title:n||document.title||'Media',referer:location.href,thumb:null
         });}catch(e){}
     }
 
-    // ★ Get best downloadable src from video (not blob/data)
+    // ★ Get best downloadable URL for a video element
     function bestSrc(v){
+        // 1. Direct src (non-blob)
         var s=v.currentSrc||v.src||'';
-        if(!s||s.startsWith('blob:')||s.startsWith('data:')){
-            var ss=v.querySelectorAll('source');
-            for(var i=0;i<ss.length;i++){if(ss[i].src&&!ss[i].src.startsWith('blob:')){s=ss[i].src;break;}}
+        if(s&&!s.startsWith('blob:')&&!s.startsWith('data:'))return s;
+        // 2. <source> elements
+        var ss=v.querySelectorAll('source');
+        for(var i=0;i<ss.length;i++){
+            if(ss[i].src&&!ss[i].src.startsWith('blob:')&&!ss[i].src.startsWith('data:'))return ss[i].src;
         }
-        if(!s||s.startsWith('blob:')){
-            if(window.__gsURLs&&window.__gsURLs.length>0)s=window.__gsURLs[window.__gsURLs.length-1];
+        // 3. Network-intercepted URLs (Performance API + XHR/fetch)
+        // Use most recent video URL from our capture list
+        if(window.__gsVideoURLs&&window.__gsVideoURLs.length>0){
+            // Prefer m3u8 > mp4 > other
+            var hlsURLs=window.__gsVideoURLs.filter(function(x){return x.type==='hls';});
+            if(hlsURLs.length>0)return hlsURLs[hlsURLs.length-1].url;
+            var mp4URLs=window.__gsVideoURLs.filter(function(x){return x.type==='mp4';});
+            if(mp4URLs.length>0)return mp4URLs[mp4URLs.length-1].url;
+            return window.__gsVideoURLs[window.__gsVideoURLs.length-1].url;
         }
-        return(s&&!s.startsWith('blob:')&&!s.startsWith('data:'))?s:null;
+        // 4. Re-scan Performance API right now
+        try{
+            var vidPat=/\\.(mp4|webm|m4v|mov|m3u8|ts)(\\?|#|$)/i;
+            var cdnPat=/videoplayback|googlevideo|fbcdn.*video|cdninstagram.*video|twimg.*video/i;
+            var entries=performance.getEntriesByType('resource');
+            for(var j=entries.length-1;j>=0;j--){
+                var name=entries[j].name;
+                if(vidPat.test(name)||cdnPat.test(name))return name;
+            }
+        }catch(e){}
+        return null;
     }
 
-    // ═══ DOWNLOAD BUTTON on each video ═══
+    // ★ Download button on each video
     function addBtn(v){
         if(v.dataset.gsB)return;v.dataset.gsB='1';
         var w=v.parentElement;if(!w)return;
         if(getComputedStyle(w).position==='static')w.style.position='relative';
         var b=document.createElement('div');
         b.innerHTML='\\u2B07';
-        b.style.cssText='position:absolute;top:8px;right:8px;z-index:999999;background:rgba(0,180,140,0.92);border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.4);pointer-events:auto;font-size:18px;color:white;';
+        b.style.cssText='position:absolute;top:8px;right:8px;z-index:999999;background:rgba(0,180,140,0.92);border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,0.5);pointer-events:auto;font-size:20px;color:white;-webkit-backdrop-filter:blur(4px);';
         b.onclick=function(e){e.stopPropagation();e.preventDefault();
             var src=bestSrc(v);
             if(src){
                 try{window.webkit.messageHandlers.downloadVideo.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p'});}catch(x){}
                 try{window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p'});}catch(x){}
                 b.textContent='\\u2705';b.style.background='rgba(34,197,94,0.92)';
-                setTimeout(function(){b.textContent='\\u2B07';b.style.background='rgba(0,180,140,0.92)';},2000);
+                setTimeout(function(){b.textContent='\\u2B07';b.style.background='rgba(0,180,140,0.92)';},2500);
             }else{
                 b.textContent='\\u274C';b.style.background='rgba(220,50,50,0.92)';
-                setTimeout(function(){b.textContent='\\u2B07';b.style.background='rgba(0,180,140,0.92)';},2000);
+                setTimeout(function(){b.textContent='\\u2B07';b.style.background='rgba(0,180,140,0.92)';},2500);
             }
         };
         b.ontouchend=function(e){e.stopPropagation();};
         w.appendChild(b);
-        ['play','playing','loadeddata','canplay'].forEach(function(evt){
+        // Listen to media events to capture real src
+        ['play','playing','loadeddata','canplay','loadedmetadata'].forEach(function(evt){
             v.addEventListener(evt,function(){var s=bestSrc(v);if(s)E(s,s.includes('.m3u8')?'hls':'mp4',(v.videoHeight||'Auto')+'p');},{once:true});
         });
     }
 
-    // ═══ SCAN ALL media on page ═══
+    // ★ Full page scan
     function scanAll(){
         document.querySelectorAll('video').forEach(function(v){
             addBtn(v);
@@ -441,68 +519,55 @@ enum WebViewConfigurator {
             var g=img.src.toLowerCase().indexOf('.gif')!==-1;
             if(img.naturalWidth>100||g)E(img.src,g?'gif':'image','Image',img.alt);
         });
+        // JW Player
         if(typeof jwplayer!=='undefined'){document.querySelectorAll('[id]').forEach(function(el){try{
             var p=jwplayer(el.id);if(!p||!p.getState)return;
             function ex(){var it=p.getPlaylistItem()||{};(it.sources||[]).forEach(function(s){if(s.file)E(s.file,s.file.includes('.m3u8')?'hls':'mp4',s.label||'JW');});}
             p.on('ready',ex);p.on('playlistItem',ex);if(p.getState()!=='idle')ex();
         }catch(e){}});}
+        // Re-scan Performance API
+        try{
+            var vidPat=/\\.(mp4|webm|m4v|mov|m3u8|ts)(\\?|#|$)/i;
+            var cdnPat=/videoplayback|googlevideo|fbcdn.*video|cdninstagram.*video|twimg.*video/i;
+            performance.getEntriesByType('resource').forEach(function(entry){
+                if(vidPat.test(entry.name)||cdnPat.test(entry.name)){
+                    E(entry.name,entry.name.includes('.m3u8')?'hls':'mp4','PerfScan');
+                }
+            });
+        }catch(e){}
     }
 
-    // ═══ ALOHA-STYLE FULLSCREEN BAR ═══
-    var fsBar=null;
-    function showFSBar(v){
-        removeFSBar();
-        var src=bestSrc(v);
-        fsBar=document.createElement('div');fsBar.id='__gsFS';
-        fsBar.style.cssText='position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:rgba(18,18,18,0.95);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);padding:8px 0 max(8px,env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center;font-family:-apple-system,sans-serif;';
-        var prog=document.createElement('div');
-        prog.style.cssText='width:100%;padding:0 16px;margin-bottom:6px;display:flex;align-items:center;gap:8px;';
-        var tL=document.createElement('span');tL.style.cssText='color:#aaa;font-size:11px;font-variant-numeric:tabular-nums;min-width:36px;';
-        var tR=document.createElement('span');tR.style.cssText='color:#aaa;font-size:11px;font-variant-numeric:tabular-nums;min-width:36px;text-align:right;';
-        var bar=document.createElement('div');bar.style.cssText='flex:1;height:3px;background:#444;border-radius:2px;position:relative;';
-        var fill=document.createElement('div');fill.style.cssText='height:100%;background:#00d4aa;border-radius:2px;width:0%;';
-        bar.appendChild(fill);prog.appendChild(tL);prog.appendChild(bar);prog.appendChild(tR);fsBar.appendChild(prog);
-        var row=document.createElement('div');
-        row.style.cssText='display:flex;justify-content:space-around;width:100%;max-width:420px;padding:0 12px;';
-        [{i:'\\u2B07',a:function(){
+    // ★ Fullscreen events → tell native to show UIWindow overlay
+    document.addEventListener('webkitbeginfullscreen',function(e){
+        if(e.target&&e.target.tagName==='VIDEO'){
+            var src=bestSrc(e.target);
             if(src){
-                try{window.webkit.messageHandlers.downloadVideo.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p'});}catch(x){}
-                try{window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p'});}catch(x){}
-                this.textContent='\\u2705';this.style.color='#00d4aa';
-                var s=this;setTimeout(function(){s.textContent='\\u2B07';s.style.color='#fff';},2000);
+                try{window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(e.target.videoHeight||'Auto')+'p',fullscreen:true});}catch(x){}
             }
-        }},{i:'\\uD83D\\uDCF1',a:function(){
-            try{if(v.webkitSetPresentationMode)v.webkitSetPresentationMode('picture-in-picture');
-            else if(v.requestPictureInPicture)v.requestPictureInPicture();}catch(x){}
-        }},{i:'\\uD83D\\uDD01',a:function(){v.loop=!v.loop;this.style.color=v.loop?'#00d4aa':'#fff';}},
-        {i:'\\uD83D\\uDCE1',a:function(){try{v.webkitShowPlaybackTargetPicker();}catch(x){}}},
-        {i:'\\u2716',a:function(){removeFSBar();}}
-        ].forEach(function(item){
-            var btn=document.createElement('button');btn.textContent=item.i;
-            btn.style.cssText='background:none;border:none;color:#fff;font-size:22px;padding:8px 14px;cursor:pointer;';
-            btn.onclick=function(e){e.stopPropagation();item.a.call(btn);};
-            row.appendChild(btn);
-        });
-        fsBar.appendChild(row);document.body.appendChild(fsBar);
-        function upd(){
-            if(!fsBar||!document.body.contains(fsBar))return;
-            var c=v.currentTime||0,d=v.duration||0;
-            function f(s){var m=Math.floor(s/60);s=Math.floor(s%60);return(m<10?'0':'')+m+':'+(s<10?'0':'')+s;}
-            tL.textContent=f(c);tR.textContent=f(d);
-            fill.style.width=d>0?((c/d)*100)+'%':'0%';
-            requestAnimationFrame(upd);
         }
-        upd();
+    },true);
+    document.addEventListener('webkitendfullscreen',function(){
+        try{window.webkit.messageHandlers.alohaDownload.postMessage({url:'__hide_overlay__',title:'',quality:'',fullscreen:false});}catch(x){}
+    },true);
+    // CSS Fullscreen API
+    function onFSChange(){
+        var el=document.fullscreenElement||document.webkitFullscreenElement;
+        if(el){
+            var v=el.tagName==='VIDEO'?el:el.querySelector('video');
+            if(v){
+                var src=bestSrc(v);
+                if(src){
+                    try{window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p',fullscreen:true});}catch(x){}
+                }
+            }
+        }else{
+            try{window.webkit.messageHandlers.alohaDownload.postMessage({url:'__hide_overlay__',title:'',quality:'',fullscreen:false});}catch(x){}
+        }
     }
-    function removeFSBar(){if(fsBar&&fsBar.parentNode)fsBar.parentNode.removeChild(fsBar);fsBar=null;var o=document.getElementById('__gsFS');if(o)o.remove();}
+    document.addEventListener('fullscreenchange',onFSChange);
+    document.addEventListener('webkitfullscreenchange',onFSChange);
 
-    // Fullscreen events
-    document.addEventListener('webkitfullscreenchange',function(){var el=document.webkitFullscreenElement;if(el){var v=el.tagName==='VIDEO'?el:el.querySelector('video');if(v)showFSBar(v);}else removeFSBar();});
-    document.addEventListener('fullscreenchange',function(){var el=document.fullscreenElement;if(el){var v=el.tagName==='VIDEO'?el:el.querySelector('video');if(v)showFSBar(v);}else removeFSBar();});
-    document.addEventListener('webkitbeginfullscreen',function(e){if(e.target&&e.target.tagName==='VIDEO')showFSBar(e.target);},true);
-    document.addEventListener('webkitendfullscreen',function(){removeFSBar();},true);
-
-    // ═══ ELEMENT HIDER ═══
+    // ★ Element hider
     var hm=false,hl=null;
     window._gsToggleHideMode=function(){hm=!hm;if(!hm&&hl){hl.style.outline='';hl=null;}return hm;};
     document.addEventListener('touchstart',function(e){if(!hm)return;e.preventDefault();e.stopPropagation();
@@ -523,7 +588,7 @@ enum WebViewConfigurator {
             if(s)try{window.webkit.messageHandlers.alohaDownload.postMessage({url:s,title:document.title,quality:(v.videoHeight||'Auto')+'p'});}catch(x){}}
     },true);
 
-    // ═══ AD REMOVAL ═══
+    // ★ Ad removal
     new MutationObserver(function(muts){muts.forEach(function(m){m.addedNodes.forEach(function(n){
         if(n.nodeType!==1)return;
         if(n.tagName==='IFRAME'){var s=n.src||'';if(s.match(/ad[.s]|doubleclick|googlesyndication|adfit|cauly|mobon|adpopcorn|realclick|admixer/i)){n.style.display='none';n.remove();try{window.webkit.messageHandlers.privacyEvent.postMessage({event:'ad_blocked'});}catch(x){}}}
@@ -534,12 +599,24 @@ enum WebViewConfigurator {
         if(n.querySelectorAll)n.querySelectorAll('video').forEach(addBtn);
     });});}).observe(document.body||document.documentElement,{childList:true,subtree:true});
 
-    // ═══ RUN ═══
-    scanAll();setTimeout(scanAll,800);setTimeout(scanAll,2500);setTimeout(scanAll,5000);
-    setInterval(function(){document.querySelectorAll('video').forEach(function(v){
-        if(!v.dataset.gsB)addBtn(v);
-        if(!v.paused&&!v.dataset.gsE2){v.dataset.gsE2='1';var s=bestSrc(v);if(s)E(s,s.includes('.m3u8')?'hls':'mp4',(v.videoHeight||'Auto')+'p');}
-    });},3000);
+    // ★ Run + periodic rescan
+    scanAll();setTimeout(scanAll,1000);setTimeout(scanAll,3000);setTimeout(scanAll,6000);
+    setInterval(function(){
+        document.querySelectorAll('video').forEach(function(v){
+            if(!v.dataset.gsB)addBtn(v);
+            if(!v.paused&&!v.dataset.gsE2){v.dataset.gsE2='1';var s=bestSrc(v);if(s)E(s,s.includes('.m3u8')?'hls':'mp4',(v.videoHeight||'Auto')+'p');}
+        });
+        // Re-scan Performance API periodically
+        try{
+            var vidPat=/\\.(mp4|webm|m4v|mov|m3u8|ts)(\\?|#|$)/i;
+            var cdnPat=/videoplayback|googlevideo|fbcdn.*video|cdninstagram.*video|twimg.*video/i;
+            performance.getEntriesByType('resource').forEach(function(entry){
+                if(vidPat.test(entry.name)||cdnPat.test(entry.name)){
+                    E(entry.name,entry.name.includes('.m3u8')?'hls':'mp4','Periodic');
+                }
+            });
+        }catch(e){}
+    },4000);
     })();
     """
 }
