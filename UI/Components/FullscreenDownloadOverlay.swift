@@ -1,7 +1,6 @@
 // UI/Components/FullscreenDownloadOverlay.swift
 // GhostStream — Aloha-style fullscreen download bar
-// UIWindow at .statusBar+200 — ONLY way to show UI during iOS native video fullscreen
-// (JS elements are hidden because system AVPlayerViewController takes over)
+// UIWindow at .statusBar+200 — the ONLY way to show UI over iOS native video fullscreen
 
 import UIKit
 
@@ -14,9 +13,14 @@ final class FullscreenDownloadOverlay {
     private var pendingTitle: String = ""
     private var pendingQuality: String = "Auto"
     private var strongDownloadManager: MediaDownloadManager?
+    private var hideWorkItem: DispatchWorkItem?
 
     func show(url: URL, title: String, quality: String, downloadManager: MediaDownloadManager) {
         DispatchQueue.main.async { [self] in
+            // Cancel any pending hide
+            hideWorkItem?.cancel()
+            hideWorkItem = nil
+
             pendingURL = url
             pendingTitle = title.isEmpty ? url.deletingPathExtension().lastPathComponent : title
             pendingQuality = quality
@@ -28,7 +32,7 @@ final class FullscreenDownloadOverlay {
 
     func hide() {
         DispatchQueue.main.async { [self] in
-            UIView.animate(withDuration: 0.2, animations: {
+            UIView.animate(withDuration: 0.25, animations: {
                 self.overlayWindow?.alpha = 0
             }, completion: { _ in
                 self.overlayWindow?.isHidden = true
@@ -36,6 +40,16 @@ final class FullscreenDownloadOverlay {
                 self.strongDownloadManager = nil
             })
         }
+    }
+
+    /// Debounced hide — waits before actually hiding (prevents premature dismiss)
+    func hideDebounced(delay: TimeInterval = 1.5) {
+        hideWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.hide()
+        }
+        hideWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func buildWindow() {
@@ -68,12 +82,10 @@ final class FullscreenDownloadOverlay {
         let barY = screenBounds.height - barH - safeBottom
         let bar = UIView(frame: CGRect(x: 0, y: barY, width: screenBounds.width, height: barH + safeBottom))
 
-        // Blur background (Aloha style)
         let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterialDark))
         blur.frame = bar.bounds
         bar.addSubview(blur)
 
-        // Buttons row
         let stack = UIStackView()
         stack.axis = .horizontal
         stack.distribution = .equalSpacing
@@ -81,19 +93,15 @@ final class FullscreenDownloadOverlay {
         stack.frame = CGRect(x: 20, y: 8, width: screenBounds.width - 40, height: 56)
         bar.addSubview(stack)
 
-        // ⬇️ Download
-        stack.addArrangedSubview(makeBarButton(icon: "arrow.down.circle.fill", label: "저장", color: .systemTeal, action: #selector(tappedDownload)))
-        // 📱 PiP — placeholder
-        stack.addArrangedSubview(makeBarButton(icon: "pip.fill", label: "PiP", color: .white, action: #selector(tappedClose)))
-        // 🔁 Repeat — placeholder
-        stack.addArrangedSubview(makeBarButton(icon: "repeat", label: "반복", color: .white, action: #selector(tappedClose)))
-        // ✖ Close
-        stack.addArrangedSubview(makeBarButton(icon: "xmark.circle.fill", label: "닫기", color: .systemRed.withAlphaComponent(0.8), action: #selector(tappedClose)))
+        stack.addArrangedSubview(makeBtn(icon: "arrow.down.circle.fill", label: "저장", color: .systemTeal, action: #selector(tappedDownload)))
+        stack.addArrangedSubview(makeBtn(icon: "pip.fill", label: "PiP", color: .white, action: #selector(tappedClose)))
+        stack.addArrangedSubview(makeBtn(icon: "repeat", label: "반복", color: .white, action: #selector(tappedClose)))
+        stack.addArrangedSubview(makeBtn(icon: "xmark.circle.fill", label: "닫기", color: .systemRed.withAlphaComponent(0.8), action: #selector(tappedClose)))
 
         return bar
     }
 
-    private func makeBarButton(icon: String, label: String, color: UIColor, action: Selector) -> UIButton {
+    private func makeBtn(icon: String, label: String, color: UIColor, action: Selector) -> UIButton {
         var config = UIButton.Configuration.plain()
         config.image = UIImage(systemName: icon, withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .medium))
         config.title = label
@@ -107,16 +115,16 @@ final class FullscreenDownloadOverlay {
     }
 
     @objc private func tappedDownload() {
-        guard let url = pendingURL, let dm = strongDownloadManager else { hide(); return }
-        let isHLS = url.absoluteString.contains(".m3u8")
-        let media = DetectedMedia(
-            url: url, type: isHLS ? .hls : .mp4,
-            quality: pendingQuality, title: pendingTitle,
-            referer: "", thumbnail: nil, estimatedSize: nil
-        )
-        dm.download(media: media, saveToVault: false)
+        guard let url = pendingURL else { hide(); return }
 
-        // Feedback
+        // ★ Post notification for WKWebView.startDownload (coordinator handles it)
+        // This ensures download uses browser's own session (cookies, auth)
+        NotificationCenter.default.post(name: .startImmediateDownload, object:
+            DetectedMedia(url: url, type: url.absoluteString.contains(".m3u8") ? .hls : .mp4,
+                quality: pendingQuality, title: pendingTitle,
+                referer: "", thumbnail: nil, estimatedSize: nil))
+
+        // Visual feedback
         if let bar = overlayWindow?.subviews.first,
            let stack = bar.subviews.compactMap({ $0 as? UIStackView }).first,
            let dlBtn = stack.arrangedSubviews.first as? UIButton {

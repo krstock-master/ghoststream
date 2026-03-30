@@ -21,10 +21,17 @@ struct BrowserWebView: UIViewRepresentable {
         webView.allowsBackForwardNavigationGestures = true
         context.coordinator.downloadManager = downloadManager
         context.coordinator.observeWebView(webView)
-        // Forward WKWebView cookies → downloadManager for authenticated HLS streams
         context.coordinator.webView = webView
         DispatchQueue.main.async { webViewRef = webView }
         if let url = tab.url { webView.load(URLRequest(url: url)) }
+
+        // ★ Listen for download requests from FullscreenOverlay / snackbar
+        let coord = context.coordinator
+        NotificationCenter.default.addObserver(forName: .wkDownloadRequested, object: nil, queue: .main) { [weak coord] n in
+            guard let media = n.object as? DetectedMedia, let coord = coord else { return }
+            coord.startWKDownload(url: media.url, title: media.title)
+        }
+
         return webView
     }
 

@@ -11,23 +11,26 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
     var completedDownloads: [MediaDownload] = []
 
     private let vaultManager: VaultManager
-    private var urlSession: URLSession?
+    var urlSession: URLSession?
     private var taskMap: [Int: String] = [:]
     private var hlsTaskMap: [UUID: Task<Void, Never>] = [:]
 
     // Injected from BrowserWebView when a download starts (cookie forwarding)
     var cookieStorage: HTTPCookieStorage = .shared
+    // ★ WKWebView reference for WKDownload API (fastest approach)
+    weak var webViewRef: WKWebView?
 
     init(vaultManager: VaultManager) {
         self.vaultManager = vaultManager
         super.init()
 
-        // Foreground session — sideloaded apps cannot use background sessions
-        // (background entitlements are stripped by Sideloadly/TrollStore)
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 60
         config.timeoutIntervalForResource = 600
         config.waitsForConnectivity = true
+        // ★ Enable cookie storage on the session itself
+        config.httpCookieStorage = .shared
+        config.httpCookieAcceptPolicy = .always
         urlSession = URLSession(configuration: config, delegate: self, delegateQueue: .main)
     }
 
@@ -45,7 +48,6 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
         case .gif:
             startDirectDownload(dl)
         case .blob:
-            // Already saved locally, just move to vault
             dl.state = .completed
             dl.progress = 1.0
             dl.localURL = media.url
@@ -54,6 +56,15 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
             }
             completedDownloads.insert(dl, at: 0)
         }
+    }
+
+    // ★ Download with cookies pre-loaded (called from WebViewCoordinator)
+    func downloadWithCookies(media: DetectedMedia, cookies: [HTTPCookie], saveToVault: Bool = false) {
+        // Set cookies to shared storage BEFORE starting download
+        let storage = HTTPCookieStorage.shared
+        cookies.forEach { storage.setCookie($0) }
+        self.cookieStorage = storage
+        download(media: media, saveToVault: saveToVault)
     }
 
     func pause(_ dl: MediaDownload) {
@@ -86,30 +97,46 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
         download(media: dl.media, saveToVault: dl.saveToVault)
     }
 
-    // MARK: - Direct Download (MP4/GIF)
+    // MARK: - Direct Download (MP4/GIF) — 3가지 방안
 
     private func startDirectDownload(_ dl: MediaDownload) {
-        // Skip blob: URLs — these can't be downloaded by URLSession
         if dl.media.url.scheme == "blob" {
             dl.state = .failed
-            dl.error = "blob: URL은 직접 다운로드 불가 (페이지에서 재생 후 녹화 필요)"
+            dl.error = "blob: URL은 직접 다운로드 불가"
             return
         }
 
+        // ★ Build request with ALL necessary headers + cookies
         var request = URLRequest(url: dl.media.url)
         request.setValue(dl.media.referer, forHTTPHeaderField: "Referer")
-        // Set Origin header for CORS
         if let refURL = URL(string: dl.media.referer), let host = refURL.host {
             request.setValue("\(refURL.scheme ?? "https")://\(host)", forHTTPHeaderField: "Origin")
         }
-        let ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+        let ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
         request.setValue(ua, forHTTPHeaderField: "User-Agent")
-        request.setValue("*/*", forHTTPHeaderField: "Accept")
-        // Forward cookies from WKWebView session
-        if let cookies = cookieStorage.cookies(for: dl.media.url), !cookies.isEmpty {
-            let cookieHeader = cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+        request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        request.setValue("gzip, deflate, br", forHTTPHeaderField: "Accept-Encoding")
+        request.setValue("ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7", forHTTPHeaderField: "Accept-Language")
+
+        // ★★★ CRITICAL: Get cookies from ALL sources and set on request ★★★
+        var allCookies: [HTTPCookie] = []
+        // Source 1: Shared cookie storage (synced from WKWebView)
+        if let cookies = cookieStorage.cookies(for: dl.media.url) {
+            allCookies.append(contentsOf: cookies)
+        }
+        // Source 2: HTTPCookieStorage.shared (may differ from cookieStorage)
+        if let cookies = HTTPCookieStorage.shared.cookies(for: dl.media.url) {
+            for c in cookies where !allCookies.contains(where: { $0.name == c.name && $0.domain == c.domain }) {
+                allCookies.append(c)
+            }
+        }
+        // Set cookies directly on request header
+        if !allCookies.isEmpty {
+            let cookieHeader = allCookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
             request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
         }
+        // Also set via HTTPCookieStorage for URLSession automatic handling
+        urlSession?.configuration.httpCookieStorage?.setCookies(allCookies, for: dl.media.url, mainDocumentURL: nil)
 
         let task = urlSession?.downloadTask(with: request)
         dl.sessionTaskID = task?.taskIdentifier

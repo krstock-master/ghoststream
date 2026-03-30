@@ -52,10 +52,12 @@ struct BrowserContainerView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .startImmediateDownload)) { n in
             if let media = n.object as? DetectedMedia {
-                downloadManager.download(media: media, saveToVault: false)
                 latestMedia = media
                 withAnimation { showMediaSnackbar = true }
                 Task { try? await Task.sleep(for: .seconds(3)); withAnimation { showMediaSnackbar = false } }
+
+                // ★ Route through WKWebView notification → coordinator handles startWKDownload
+                NotificationCenter.default.post(name: .wkDownloadRequested, object: media)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .downloadCompleted)) { n in

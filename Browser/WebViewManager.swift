@@ -113,22 +113,65 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     }
 
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String) async -> URL? {
-        pendingDownloadFilename = suggestedFilename
+        // ★ HTTP validation
+        if let httpResponse = response as? HTTPURLResponse {
+            let statusCode = httpResponse.statusCode
+            if statusCode >= 400 {
+                NotificationCenter.default.post(name: .downloadFailed, object: "서버 오류: HTTP \(statusCode)")
+                return nil
+            }
+            // Reject HTML responses (login pages, error pages)
+            if let mime = httpResponse.mimeType?.lowercased(), mime.contains("text/html") {
+                NotificationCenter.default.post(name: .downloadFailed, object: "다운로드 실패: 서버가 영상 대신 웹페이지를 반환")
+                return nil
+            }
+        }
+
+        // Build filename: prefer title from activeWKDownloads, then suggested
+        let title = activeWKDownloads[download] ?? suggestedFilename
+        var filename = suggestedFilename
+        if filename.isEmpty || filename == "Unknown" {
+            let ext = (response as? HTTPURLResponse)?.mimeType?.contains("mp4") == true ? "mp4" : "mp4"
+            filename = "\(title.prefix(50))_\(Int(Date().timeIntervalSince1970)).\(ext)"
+        }
+        filename = filename.replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+        pendingDownloadFilename = filename
+
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Downloads", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let dest = dir.appendingPathComponent(suggestedFilename)
+        let dest = dir.appendingPathComponent(filename)
         if FileManager.default.fileExists(atPath: dest.path) { try? FileManager.default.removeItem(at: dest) }
         return dest
     }
 
     func downloadDidFinish(_ download: WKDownload) {
-        // Notify user download completed
-        NotificationCenter.default.post(name: .downloadCompleted, object: pendingDownloadFilename)
+        let title = activeWKDownloads.removeValue(forKey: download) ?? pendingDownloadFilename ?? "파일"
+        // Check file size
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Downloads", isDirectory: true)
+        if let fname = pendingDownloadFilename {
+            let filePath = dir.appendingPathComponent(fname)
+            let size = (try? FileManager.default.attributesOfItem(atPath: filePath.path)[.size] as? Int) ?? 0
+            let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+            NotificationCenter.default.post(name: .downloadCompleted, object: "✅ \(title) 다운로드 완료 (\(sizeStr))")
+        } else {
+            NotificationCenter.default.post(name: .downloadCompleted, object: "✅ \(title) 다운로드 완료")
+        }
     }
 
     func download(_ download: WKDownload, didFailWithError error: any Error, resumeData: Data?) {
-        NotificationCenter.default.post(name: .downloadFailed, object: error.localizedDescription)
+        activeWKDownloads.removeValue(forKey: download)
+        let nsError = error as NSError
+        let msg: String
+        switch nsError.code {
+        case NSURLErrorTimedOut: msg = "다운로드 시간 초과"
+        case NSURLErrorNotConnectedToInternet: msg = "인터넷 연결 없음"
+        case NSURLErrorCancelled: msg = "다운로드 취소됨"
+        default: msg = "다운로드 실패: \(error.localizedDescription)"
+        }
+        NotificationCenter.default.post(name: .downloadFailed, object: msg)
     }
 
     // MARK: - New window (target=_blank)
@@ -195,40 +238,32 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 NotificationCenter.default.post(name: .downloadFailed, object: "이 영상은 스트리밍 전용으로 직접 다운로드할 수 없습니다")
                 return
             }
-            let type2: DetectedMedia.MediaType = urlStr2.contains(".m3u8") ? .hls : .mp4
-            let title2 = (dict["title"] as? String) ?? url2.deletingPathExtension().lastPathComponent
-            let quality2 = (dict["quality"] as? String) ?? "Auto"
-            let media2 = DetectedMedia(url: url2, type: type2, quality: quality2, title: title2,
-                referer: tab.url?.absoluteString ?? "", thumbnail: nil, estimatedSize: nil)
-            syncCookiesToDownloadManager()
-            downloadManager?.download(media: media2, saveToVault: false)
-            onMediaDetected(media2)
+            // ★ 방법 1: WKWebView.startDownload — 브라우저 세션(쿠키/인증) 그대로 사용
+            // 삼성 브라우저 / 알로하와 동일한 방식
+            startWKDownload(url: url2, title: (dict["title"] as? String) ?? "Video")
         case "alohaDownload":
             guard let urlStr = dict["url"] as? String, let url = URL(string: urlStr) else { return }
-            // Hide overlay signal from webkitendfullscreen
-            if urlStr == "__hide_overlay__" { FullscreenDownloadOverlay.shared.hide(); return }
-            // Reject blob: and data: URLs
-            if url.scheme == "blob" || url.scheme == "data" {
-                NotificationCenter.default.post(name: .downloadFailed, object: "이 영상은 스트리밍 전용으로 직접 다운로드할 수 없습니다 (blob/MediaSource)")
+            if urlStr == "__hide_overlay__" {
+                // Debounce: 전체화면 종료 후 1.5초 뒤에 숨김 (즉시 숨기면 안 됨)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    FullscreenDownloadOverlay.shared.hide()
+                }
                 return
             }
-            let type: DetectedMedia.MediaType = urlStr.contains(".m3u8") ? .hls : .mp4
+            if url.scheme == "blob" || url.scheme == "data" {
+                NotificationCenter.default.post(name: .downloadFailed, object: "이 영상은 스트리밍 전용입니다 (blob/MediaSource)")
+                return
+            }
             let title = (dict["title"] as? String) ?? url.deletingPathExtension().lastPathComponent
             let quality = (dict["quality"] as? String) ?? "Auto"
             let isFullscreen = (dict["fullscreen"] as? Bool) == true
-            let media = DetectedMedia(url: url, type: type, quality: quality, title: title,
-                referer: tab.url?.absoluteString ?? "", thumbnail: nil, estimatedSize: nil)
             if isFullscreen {
-                // Show native overlay button instead of auto-downloading
-                // (user sees button and consciously taps to download)
                 if let dm = downloadManager {
                     FullscreenDownloadOverlay.shared.show(url: url, title: title, quality: quality, downloadManager: dm)
                 }
             } else {
-                // Normal Aloha-style: 1-tap download from overlay button
-                syncCookiesToDownloadManager()
-                downloadManager?.download(media: media, saveToVault: false)
-                onMediaDetected(media)
+                // ★ 방법 1: WKWebView.startDownload
+                startWKDownload(url: url, title: title)
             }
         case "blobCapture":
             guard let dataURL = dict["data"] as? String, let mime = dict["mimeType"] as? String,
@@ -250,13 +285,68 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         }
     }
 
-    // MARK: - Cookie Sync
+    // MARK: - Cookie Sync — ★ 쿠키를 먼저 동기화한 후 다운로드 시작
     func syncCookiesToDownloadManager() {
         guard let wv = webView, let dm = downloadManager else { return }
         wv.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
             let storage = HTTPCookieStorage.shared
             cookies.forEach { storage.setCookie($0) }
             dm.cookieStorage = storage
+            // Also set on URLSession config
+            dm.urlSession?.configuration.httpCookieStorage?.setCookies(cookies, for: wv.url, mainDocumentURL: nil)
+        }
+    }
+
+    // ★ NEW: Download with cookies pre-loaded (async-safe)
+    func downloadWithCookiesSync(media: DetectedMedia) {
+        guard let wv = webView, let dm = downloadManager else { return }
+        wv.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+            // Cookies are ready NOW — start download
+            DispatchQueue.main.async {
+                dm.downloadWithCookies(media: media, cookies: cookies, saveToVault: false)
+            }
+        }
+    }
+
+    // MARK: - ★★★ WKWebView.startDownload — 핵심 다운로드 방법 ★★★
+    // 삼성 브라우저 / 알로하와 동일: 브라우저 자체 네트워크 스택 사용
+    // → 쿠키, 인증 토큰, Referer 자동 포함 → CDN이 정상 응답
+    private var activeWKDownloads: [WKDownload: String] = [:]  // download → title
+
+    func startWKDownload(url: URL, title: String) {
+        guard let wv = webView else {
+            // Fallback: WKWebView 참조 없으면 URLSession으로
+            let media = DetectedMedia(url: url, type: url.absoluteString.contains(".m3u8") ? .hls : .mp4,
+                quality: "Auto", title: title, referer: tab.url?.absoluteString ?? "",
+                thumbnail: nil, estimatedSize: nil)
+            downloadWithCookiesSync(media: media)
+            return
+        }
+
+        // HLS는 URLSession으로 (m3u8 파싱 필요)
+        if url.absoluteString.contains(".m3u8") {
+            let media = DetectedMedia(url: url, type: .hls, quality: "HLS", title: title,
+                referer: tab.url?.absoluteString ?? "", thumbnail: nil, estimatedSize: nil)
+            downloadWithCookiesSync(media: media)
+            return
+        }
+
+        // ★ MP4/WebM/MOV: WKWebView.startDownload — 브라우저 세션 그대로 사용
+        var request = URLRequest(url: url)
+        request.setValue(tab.url?.absoluteString ?? "", forHTTPHeaderField: "Referer")
+
+        Task { @MainActor in
+            do {
+                let download = try await wv.startDownload(using: request)
+                download.delegate = self
+                activeWKDownloads[download] = title
+                NotificationCenter.default.post(name: .downloadCompleted, object: "다운로드 시작: \(title)")
+            } catch {
+                // Fallback: WKDownload 실패 시 URLSession으로 재시도
+                let media = DetectedMedia(url: url, type: .mp4, quality: "Auto", title: title,
+                    referer: tab.url?.absoluteString ?? "", thumbnail: nil, estimatedSize: nil)
+                downloadWithCookiesSync(media: media)
+            }
         }
     }
 
@@ -545,9 +635,8 @@ enum WebViewConfigurator {
             }
         }
     },true);
-    document.addEventListener('webkitendfullscreen',function(){
-        try{window.webkit.messageHandlers.alohaDownload.postMessage({url:'__hide_overlay__',title:'',quality:'',fullscreen:false});}catch(x){}
-    },true);
+    // ★ webkitendfullscreen REMOVED — this fires when iOS system player takes over,
+    // causing the overlay to hide after 1 second. Overlay now only hides via X button.
     // CSS Fullscreen API
     function onFSChange(){
         var el=document.fullscreenElement||document.webkitFullscreenElement;
@@ -626,4 +715,5 @@ extension Notification.Name {
     static let startImmediateDownload = Notification.Name("startImmediateDownload")
     static let downloadCompleted = Notification.Name("downloadCompleted")
     static let downloadFailed = Notification.Name("downloadFailed")
+    static let wkDownloadRequested = Notification.Name("wkDownloadRequested")
 }
