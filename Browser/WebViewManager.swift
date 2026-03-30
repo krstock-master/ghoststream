@@ -203,20 +203,6 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             syncCookiesToDownloadManager()
             downloadManager?.download(media: media2, saveToVault: false)
             onMediaDetected(media2)
-        case "downloadVideo":
-            guard let urlStr2 = dict["url"] as? String, let url2 = URL(string: urlStr2) else { return }
-            if url2.scheme == "blob" || url2.scheme == "data" {
-                NotificationCenter.default.post(name: .downloadFailed, object: "이 영상은 스트리밍 전용입니다 (blob/MediaSource)")
-                return
-            }
-            let type2: DetectedMedia.MediaType = urlStr2.contains(".m3u8") ? .hls : .mp4
-            let title2 = (dict["title"] as? String) ?? url2.deletingPathExtension().lastPathComponent
-            let quality2 = (dict["quality"] as? String) ?? "Auto"
-            let media2 = DetectedMedia(url: url2, type: type2, quality: quality2, title: title2,
-                referer: tab.url?.absoluteString ?? "", thumbnail: nil, estimatedSize: nil)
-            syncCookiesToDownloadManager()
-            downloadManager?.download(media: media2, saveToVault: false)
-            onMediaDetected(media2)
         case "alohaDownload":
             guard let urlStr = dict["url"] as? String, let url = URL(string: urlStr) else { return }
             // Hide overlay signal from webkitendfullscreen
@@ -299,6 +285,19 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
 
 // MARK: - Element Hider Store
 final class ElementHiderStore {
+    static let shared = ElementHiderStore()
+    private var store: [String: [String]] = [:]
+    init() {
+        if let d = UserDefaults.standard.data(forKey: "elementHiderRules"),
+           let s = try? JSONDecoder().decode([String:[String]].self, from: d) { store = s }
+    }
+    func addRule(_ sel: String, for host: String) {
+        var r = store[host] ?? []; if !r.contains(sel) { r.append(sel); store[host] = r; save() }
+    }
+    func rules(for host: String) -> [String] { store[host] ?? [] }
+    func clearRules(for host: String) { store.removeValue(forKey: host); save() }
+    private func save() { if let d = try? JSONEncoder().encode(store) { UserDefaults.standard.set(d, forKey: "elementHiderRules") } }
+}
 
 // MARK: - WebView Configuration
 enum WebViewConfigurator {
