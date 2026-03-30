@@ -171,10 +171,9 @@ struct BrowserContainerView: View {
             } else {
                 BrowserWebView(tab: tab, privacyEngine: privacyEngine, downloadManager: downloadManager,
                     bookmarkManager: container.bookmarkManager,
-                    onMediaDetected: { media in
-                        latestMedia = media
-                        withAnimation { showMediaSnackbar = true }
-                        Task { try? await Task.sleep(for: .seconds(5)); withAnimation { showMediaSnackbar = false } }
+                    onMediaDetected: { _ in
+                        // ★ F4: 미디어 감지 알림 제거 (사용자 피드백: 효용성 없음)
+                        // 미디어는 여전히 감지되어 다운로드 시트에서 사용 가능
                     }, webViewRef: $webViewRef).id(tab.id)
             }
         }
@@ -254,6 +253,16 @@ struct BrowserContainerView: View {
                     if tabManager.activeTab?.isLoading == true {
                         ProgressView().scaleEffect(0.55)
                     } else if tabManager.activeTab?.url != nil {
+                        // ★ F2: 북마크 버튼 (주소바에 배치)
+                        if let tab = tabManager.activeTab, let url = tab.url {
+                            Button {
+                                container.bookmarkManager.toggleBookmark(title: tab.title, url: url)
+                            } label: {
+                                Image(systemName: container.bookmarkManager.isBookmarked(url: url) ? "star.fill" : "star")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(container.bookmarkManager.isBookmarked(url: url) ? .yellow : .secondary)
+                            }
+                        }
                         Button { webViewRef?.reload() } label: {
                             Image(systemName: "arrow.clockwise").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
                         }

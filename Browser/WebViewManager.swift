@@ -16,6 +16,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     // CF: tracks domains where we've stripped fingerprint defense scripts
     private var cfStrippedDomains: Set<String> = []
     private var cfReloadPending = false
+    private var pendingContextImageURL: URL? // ★ F3: 이미지 꾹 눌러서 저장용
 
     init(tab: Tab, privacyEngine: PrivacyEngine, onMediaDetected: @escaping (DetectedMedia) -> Void) {
         self.tab = tab; self.privacyEngine = privacyEngine; self.onMediaDetected = onMediaDetected
@@ -83,6 +84,10 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 injectionTime: .atDocumentEnd,
                 forMainFrameOnly: true
             ))
+            // ★ CF FIX: 데스크톱 모드에서 CF 감지 시 모바일 UA로 복원
+            if DeviceProfileManager.shared.isDesktopMode {
+                w.customUserAgent = DeviceProfileManager.shared.currentProfile.userAgent
+            }
             // Now reload — CF will see real Safari fingerprint → pass
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { w.reload() }
         }
@@ -91,21 +96,14 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
 
     // MARK: - Block App Store redirects (PikPak 등)
+    // ★ F3 FIX: 최소한의 차단만 — 기본 동작 유지
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.allow); return }
         let scheme = url.scheme?.lowercased() ?? ""
-        // Block app store, intent, and custom scheme redirects
+        // 앱 스토어/커스텀 스킴만 차단 (http/https는 항상 허용)
         if ["itms-apps", "itms-appss", "itms", "intent", "pikpak", "market"].contains(scheme) {
             decisionHandler(.cancel)
             return
-        }
-        // Block App Store URLs
-        if url.host?.contains("apps.apple.com") == true || url.host?.contains("itunes.apple.com") == true {
-            if navigationAction.navigationType == .other || navigationAction.targetFrame == nil {
-                // 사용자가 직접 클릭하지 않은 자동 리다이렉트는 차단
-                decisionHandler(.cancel)
-                return
-            }
         }
         decisionHandler(.allow)
     }
@@ -259,25 +257,64 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
 
     // MARK: - Context Menu (long-press) — 방법 1: Long Tap 다운로드
     func webView(_ webView: WKWebView, contextMenuConfigurationFor elementInfo: WKContextMenuElementInfo) async -> UIContextMenuConfiguration? {
-        guard let linkURL = elementInfo.linkURL else { return nil }
+        // ★ F3 FIX: 이미지/링크 모두 처리
+        let linkURL = elementInfo.linkURL
+
+        // JS로 현재 포인트의 요소 타입 확인 (이미지인지)
+        let imgResult = try? await webView.evaluateJavaScript("""
+        (function(){
+            var els=document.querySelectorAll(':hover');
+            for(var i=els.length-1;i>=0;i--){
+                var el=els[i];
+                if(el.tagName==='IMG'&&el.src&&!el.src.startsWith('data:'))return el.src;
+                if(el.style&&el.style.backgroundImage){
+                    var m=el.style.backgroundImage.match(/url\\(["']?([^"')]+)/);
+                    if(m)return m[1];
+                }
+            }
+            return '';
+        })()
+        """)
+        let imageURLStr = imgResult as? String
+        let imageURL = imageURLStr.flatMap { $0.isEmpty ? nil : URL(string: $0) }
+
+        // 이미지도 링크도 없으면 기본 메뉴
+        guard linkURL != nil || imageURL != nil else { return nil }
+
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
             var actions: [UIAction] = []
-            actions.append(UIAction(title: "새 탭에서 열기", image: UIImage(systemName: "plus.square.on.square")) { _ in
-                NotificationCenter.default.post(name: .openInNewTab, object: linkURL)
-            })
-            let ext = linkURL.pathExtension.lowercased()
-            if ["mp4","m4v","mov","webm","gif","m3u8","png","jpg","jpeg","webp"].contains(ext) {
-                // ★ WKDownload 사용 (브라우저 세션 그대로)
-                actions.append(UIAction(title: "비디오 다운로드", image: UIImage(systemName: "arrow.down.circle.fill")) { [weak self] _ in
-                    self?.startWKDownload(url: linkURL, title: linkURL.deletingPathExtension().lastPathComponent)
+
+            // ★ 이미지 액션
+            if let imgURL = imageURL {
+                actions.append(UIAction(title: "사진 저장", image: UIImage(systemName: "square.and.arrow.down")) { _ in
+                    Self.saveURLToPhotos(imgURL)
+                    NotificationCenter.default.post(name: .downloadCompleted, object: "사진 저장 중...")
                 })
-                actions.append(UIAction(title: "사진 앱에 저장", image: UIImage(systemName: "photo.badge.arrow.down")) { [weak self] _ in
-                    self?.startWKDownload(url: linkURL, title: linkURL.deletingPathExtension().lastPathComponent)
+                actions.append(UIAction(title: "이미지 복사", image: UIImage(systemName: "doc.on.doc")) { _ in
+                    URLSession.shared.dataTask(with: imgURL) { data, _, _ in
+                        if let data = data, let img = UIImage(data: data) {
+                            DispatchQueue.main.async { UIPasteboard.general.image = img }
+                        }
+                    }.resume()
                 })
             }
-            actions.append(UIAction(title: "링크 복사", image: UIImage(systemName: "doc.on.doc")) { _ in
-                UIPasteboard.general.url = linkURL
-            })
+
+            // ★ 링크 액션
+            if let linkURL = linkURL {
+                actions.append(UIAction(title: "새 탭에서 열기", image: UIImage(systemName: "plus.square.on.square")) { _ in
+                    NotificationCenter.default.post(name: .openInNewTab, object: linkURL)
+                })
+                let ext = linkURL.pathExtension.lowercased()
+                if ["mp4","m4v","mov","webm","gif","m3u8","png","jpg","jpeg","webp"].contains(ext) {
+                    actions.append(UIAction(title: "다운로드", image: UIImage(systemName: "arrow.down.circle.fill")) { [weak self] _ in
+                        self?.startWKDownload(url: linkURL, title: linkURL.deletingPathExtension().lastPathComponent)
+                    })
+                }
+                actions.append(UIAction(title: "링크 복사", image: UIImage(systemName: "doc.on.doc")) { _ in
+                    UIPasteboard.general.url = linkURL
+                })
+            }
+
             return UIMenu(children: actions)
         }
     }
