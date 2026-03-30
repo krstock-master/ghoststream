@@ -301,9 +301,12 @@ struct DownloadsManagerView: View {
         exp.outputURL = dest
         exp.outputFileType = .mp4
         exp.shouldOptimizeForNetworkUse = true
-        exp.exportAsynchronously { [weak self] in
+        let destCopy = dest
+        exp.exportAsynchronously {
             guard exp.status == .completed else { return }
-            self?.saveToGallery(url: dest, type: .mp4)
+            DispatchQueue.main.async {
+                UISaveVideoAtPathToSavedPhotosAlbum(destCopy.path, nil, nil, nil)
+            }
         }
     }
 
