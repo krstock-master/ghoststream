@@ -38,13 +38,7 @@ struct DownloadsManagerView: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("닫기") { dismiss() } } }
             .fullScreenCover(isPresented: $showPlayer) {
                 if let url = playerURL {
-                    ZStack(alignment: .topTrailing) {
-                        VideoPlayer(player: AVPlayer(url: url)).ignoresSafeArea()
-                        Button { showPlayer = false } label: {
-                            Image(systemName: "xmark.circle.fill").font(.title).foregroundStyle(.white)
-                                .shadow(radius: 4).padding()
-                        }
-                    }.background(Color.black.ignoresSafeArea())
+                    VideoPlayerSheet(url: url, isPresented: $showPlayer)
                 }
             }
         }
@@ -264,32 +258,57 @@ struct DownloadsManagerView: View {
 
     private func saveToGallery(url: URL, type: DetectedMedia.MediaType) {
         let ext = url.pathExtension.lowercased()
-        let isVideo = [DetectedMedia.MediaType.mp4, .hls, .blob, .webm].contains(type)
+        let isVideoType = [DetectedMedia.MediaType.mp4, .hls, .blob, .webm].contains(type)
             || ["mp4","m4v","mov","webm","movpkg"].contains(ext)
+        let isImage = ["jpg","jpeg","png","gif","webp","heic"].contains(ext)
 
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else { return }
 
             if ext == "movpkg" {
-                // Convert movpkg → mp4 inline before saving
+                // PHPhotoLibrary cannot save .movpkg — must export to .mp4 first
                 let asset = AVURLAsset(url: url)
+                // Use PassThrough if available (no re-encode), else HighestQuality
+                let preset: String
+                let supported = AVAssetExportSession.exportPresets(compatibleWith: asset)
+                if supported.contains(AVAssetExportPresetPassthrough) {
+                    preset = AVAssetExportPresetPassthrough
+                } else {
+                    preset = AVAssetExportPresetHighestQuality
+                }
+                guard let exp = AVAssetExportSession(asset: asset, presetName: preset) else { return }
                 let dest = url.deletingPathExtension().appendingPathExtension("mp4")
-                guard let exp = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else { return }
+                if FileManager.default.fileExists(atPath: dest.path) {
+                    try? FileManager.default.removeItem(at: dest)
+                }
                 exp.outputURL = dest
                 exp.outputFileType = .mp4
+                exp.shouldOptimizeForNetworkUse = true
                 exp.exportAsynchronously {
-                    guard exp.status == .completed else { return }
+                    guard exp.status == .completed else {
+                        print("GS export failed: \(exp.error?.localizedDescription ?? "unknown")")
+                        return
+                    }
                     PHPhotoLibrary.shared().performChanges {
                         PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: dest)
                     }
                 }
-            } else {
+            } else if isImage && ext == "gif" {
+                // GIF: save as data to preserve animation
+                guard let data = try? Data(contentsOf: url) else { return }
                 PHPhotoLibrary.shared().performChanges {
-                    if isVideo {
-                        PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
-                    } else {
-                        PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
-                    }
+                    let req = PHAssetCreationRequest.forAsset()
+                    req.addResource(with: .photo, data: data, options: nil)
+                }
+            } else if isVideoType {
+                // MP4/MOV/M4V — direct video creation
+                PHPhotoLibrary.shared().performChanges {
+                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                }
+            } else {
+                // Images (PNG, JPG, HEIC, WEBP)
+                PHPhotoLibrary.shared().performChanges {
+                    PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
                 }
             }
         }

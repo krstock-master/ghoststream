@@ -213,11 +213,10 @@ extension MediaDownloadManager: URLSessionDownloadDelegate {
             dl.localURL = dest
             dl.state = .completed
             dl.progress = 1.0
+            downloads.removeAll { $0.id == dl.id }
             completedDownloads.insert(dl, at: 0)
-
-            if dl.saveToVault {
-                Task { await moveToVault(dl) }
-            }
+            NotificationCenter.default.post(name: .downloadCompleted, object: dl.media.title)
+            if dl.saveToVault { Task { await moveToVault(dl) } }
         } catch {
             dl.state = .failed
             dl.error = error.localizedDescription
@@ -309,23 +308,21 @@ extension MediaDownloadManager: AVAssetDownloadDelegate {
         exportSession.exportAsynchronously {
             DispatchQueue.main.async {
                 if exportSession.status == .completed {
-                    // Clean up .movpkg now that MP4 exists
                     try? FileManager.default.removeItem(at: movpkgURL)
                     dl.localURL = mp4URL
                     dl.hlsConversionStatus = "MP4 변환 완료"
                 } else {
-                    // Keep .movpkg as fallback
+                    // PassThrough failed for this stream — keep .movpkg (AVPlayer can play it)
                     dl.localURL = movpkgURL
-                    dl.hlsConversionStatus = "MP4 변환 실패 – movpkg로 저장됨"
+                    dl.hlsConversionStatus = "movpkg 저장됨"
                 }
                 dl.state = .completed
                 dl.progress = 1.0
+                // Move from active → completed list
+                self.downloads.removeAll { $0.id == dl.id }
                 self.completedDownloads.insert(dl, at: 0)
                 NotificationCenter.default.post(name: .downloadCompleted, object: dl.media.title)
-
-                if dl.saveToVault, let url = dl.localURL {
-                    Task { await self.moveToVault(dl) }
-                }
+                if dl.saveToVault { Task { await self.moveToVault(dl) } }
             }
         }
     }

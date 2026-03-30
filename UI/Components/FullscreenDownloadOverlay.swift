@@ -1,7 +1,7 @@
 // UI/Components/FullscreenDownloadOverlay.swift
-// GhostStream — UIWindow-level fullscreen download button
-// Uses a dedicated UIWindow above EVERYTHING (including AVPlayerViewController)
-// so it's guaranteed visible regardless of which player is used.
+// GhostStream — Fullscreen video download overlay
+// Uses UIWindow at .statusBar+200 level with a STRONG reference to downloadManager
+// to prevent weak-capture nil issues.
 
 import UIKit
 
@@ -10,114 +10,129 @@ final class FullscreenDownloadOverlay {
     private init() {}
 
     private var overlayWindow: UIWindow?
-    private var currentURL: URL?
-    private var currentTitle: String = ""
-    private var currentQuality: String = "Auto"
+    private var pendingURL: URL?
+    private var pendingTitle: String = ""
+    private var pendingQuality: String = "Auto"
+    // STRONG reference — critical, weak was causing silent failures
+    private var strongDownloadManager: MediaDownloadManager?
 
     // MARK: - Show
-
     func show(url: URL, title: String, quality: String, downloadManager: MediaDownloadManager) {
-        guard url.absoluteString != "__hide_overlay__" else { hide(); return }
+        DispatchQueue.main.async { [self] in
+            // Update stored values regardless
+            pendingURL = url
+            pendingTitle = title.isEmpty ? url.deletingPathExtension().lastPathComponent : title
+            pendingQuality = quality
+            strongDownloadManager = downloadManager  // strong retain
 
-        currentURL     = url
-        currentTitle   = title
-        currentQuality = quality
-
-        DispatchQueue.main.async {
-            // Already showing → just update stored URL (re-use existing button)
-            if let win = self.overlayWindow, !win.isHidden {
-                self.currentURL = url; return
-            }
-            self.createOverlay(downloadManager: downloadManager)
+            if overlayWindow != nil { return }  // already showing, just updated URL
+            buildWindow()
         }
     }
 
-    // MARK: - Hide
-
     func hide() {
-        DispatchQueue.main.async {
-            UIView.animate(withDuration: 0.22, delay: 0,
-                           options: .curveEaseIn) {
+        DispatchQueue.main.async { [self] in
+            UIView.animate(withDuration: 0.18, animations: {
                 self.overlayWindow?.alpha = 0
-            } completion: { _ in
+            }, completion: { _ in
                 self.overlayWindow?.isHidden = true
                 self.overlayWindow = nil
-            }
+                self.strongDownloadManager = nil
+            })
         }
     }
 
     // MARK: - Private
-
-    private func createOverlay(downloadManager: MediaDownloadManager) {
+    private func buildWindow() {
         guard let scene = UIApplication.shared.connectedScenes
             .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene
         else { return }
 
-        // Transparent pass-through window sitting above statusBar
         let win = UIWindow(windowScene: scene)
-        win.windowLevel = .statusBar + 200          // above AVPlayerViewController
+        win.windowLevel = .statusBar + 200
         win.backgroundColor = .clear
         win.isUserInteractionEnabled = true
         win.isHidden = false
         overlayWindow = win
 
-        // Build button
-        let btn = makeButton()
-        let screenW = scene.screen.bounds.width
-        let statusH = scene.statusBarManager?.statusBarFrame.height ?? 47
-        let size: CGFloat = 52
-        let margin: CGFloat = 14
-        btn.frame = CGRect(x: screenW - size - margin, y: statusH + 6, width: size, height: size)
-        win.addSubview(btn)
+        // Container view — bottom bar style like Alloha
+        let bar = buildBottomBar(screenBounds: scene.screen.bounds)
+        win.addSubview(bar)
 
-        // Tap → download
-        let action = UIAction { [weak self, weak btn] _ in
-            guard let self, let url = self.currentURL else { return }
-            let type: DetectedMedia.MediaType = url.absoluteString.contains(".m3u8") ? .hls : .mp4
-            let media = DetectedMedia(
-                url: url, type: type, quality: self.currentQuality,
-                title: self.currentTitle.isEmpty ? url.deletingPathExtension().lastPathComponent : self.currentTitle,
-                referer: "", thumbnail: nil, estimatedSize: nil
-            )
-            downloadManager.download(media: media, saveToVault: false)
-            self.animateSuccess(btn)
-        }
-        btn.addAction(action, for: .touchUpInside)
-
-        // Animate in
-        btn.alpha = 0
-        btn.transform = CGAffineTransform(scaleX: 0.4, y: 0.4)
-        UIView.animate(withDuration: 0.35, delay: 0,
-                       usingSpringWithDamping: 0.65, initialSpringVelocity: 0.5) {
-            btn.alpha = 1
-            btn.transform = .identity
+        bar.alpha = 0
+        bar.transform = CGAffineTransform(translationX: 0, y: 60)
+        UIView.animate(withDuration: 0.3, delay: 0,
+                       usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
+            bar.alpha = 1
+            bar.transform = .identity
         }
     }
 
-    private func makeButton() -> UIButton {
-        let cfg = UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
+    private func buildBottomBar(screenBounds: CGRect) -> UIView {
+        let barH: CGFloat = 60
+        let barY = screenBounds.height - barH - 34  // above home indicator
+        let bar = UIView(frame: CGRect(x: 0, y: barY, width: screenBounds.width, height: barH))
+        bar.backgroundColor = UIColor.black.withAlphaComponent(0.72)
+
+        // Download button
+        let dlBtn = makeButton(icon: "arrow.down.circle.fill", label: "저장")
+        dlBtn.frame = CGRect(x: 16, y: 8, width: 60, height: 44)
+        dlBtn.addTarget(self, action: #selector(tappedDownload), for: .touchUpInside)
+        bar.addSubview(dlBtn)
+
+        // Title label
+        let lbl = UILabel()
+        lbl.frame = CGRect(x: 86, y: 0, width: screenBounds.width - 86 - 70, height: barH)
+        lbl.text = pendingTitle
+        lbl.textColor = UIColor.white.withAlphaComponent(0.85)
+        lbl.font = .systemFont(ofSize: 13, weight: .medium)
+        lbl.lineBreakMode = .byTruncatingMiddle
+        bar.addSubview(lbl)
+
+        // Close button
+        let closeBtn = makeButton(icon: "xmark", label: nil)
+        closeBtn.frame = CGRect(x: screenBounds.width - 52, y: 8, width: 44, height: 44)
+        closeBtn.addTarget(self, action: #selector(tappedClose), for: .touchUpInside)
+        bar.addSubview(closeBtn)
+
+        return bar
+    }
+
+    private func makeButton(icon: String, label: String?) -> UIButton {
+        let cfg = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
         let btn = UIButton(type: .custom)
-        btn.setImage(UIImage(systemName: "arrow.down.circle.fill", withConfiguration: cfg), for: .normal)
+        btn.setImage(UIImage(systemName: icon, withConfiguration: cfg), for: .normal)
         btn.tintColor = .white
-        btn.backgroundColor = UIColor(red: 0.05, green: 0.58, blue: 0.53, alpha: 0.95)
-        btn.layer.cornerRadius = 26
-        btn.layer.shadowColor  = UIColor.black.cgColor
-        btn.layer.shadowOpacity = 0.45
-        btn.layer.shadowRadius  = 10
-        btn.layer.shadowOffset  = CGSize(width: 0, height: 4)
-        btn.clipsToBounds = false
+        if let label {
+            btn.setTitle("  \(label)", for: .normal)
+            btn.titleLabel?.font = .systemFont(ofSize: 11, weight: .medium)
+        }
         return btn
     }
 
-    private func animateSuccess(_ btn: UIButton?) {
-        guard let btn else { return }
-        let cfg = UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
-        UIView.transition(with: btn, duration: 0.2, options: .transitionCrossDissolve) {
-            btn.setImage(UIImage(systemName: "checkmark.circle.fill", withConfiguration: cfg), for: .normal)
-            btn.backgroundColor = UIColor(red: 0.13, green: 0.67, blue: 0.35, alpha: 0.95)
+    @objc private func tappedDownload() {
+        guard let url = pendingURL, let dm = strongDownloadManager else {
+            hide(); return
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-            self?.hide()
+        let isHLS = url.absoluteString.contains(".m3u8")
+        let media = DetectedMedia(
+            url: url, type: isHLS ? .hls : .mp4,
+            quality: pendingQuality, title: pendingTitle,
+            referer: "", thumbnail: nil, estimatedSize: nil
+        )
+        dm.download(media: media, saveToVault: false)
+
+        // Success feedback
+        if let bar = overlayWindow?.subviews.first,
+           let dlBtn = bar.subviews.first as? UIButton {
+            let cfg = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+            UIView.transition(with: dlBtn, duration: 0.2, options: .transitionCrossDissolve) {
+                dlBtn.setImage(UIImage(systemName: "checkmark.circle.fill", withConfiguration: cfg), for: .normal)
+                dlBtn.tintColor = UIColor(red: 0.13, green: 0.78, blue: 0.45, alpha: 1)
+            }
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.hide() }
     }
+
+    @objc private func tappedClose() { hide() }
 }

@@ -12,8 +12,9 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     var downloadManager: MediaDownloadManager?
     weak var webView: WKWebView?   // set by BrowserWebView for cookie forwarding
 
-    // CF bypass guard: prevents didFinish→reload→didFinish infinite loop
-    private var cfBypassPending = false
+    // CF: tracks domains where we've stripped fingerprint defense scripts
+    private var cfStrippedDomains: Set<String> = []
+    private var cfReloadPending = false
 
     init(tab: Tab, privacyEngine: PrivacyEngine, onMediaDetected: @escaping (DetectedMedia) -> Void) {
         self.tab = tab; self.privacyEngine = privacyEngine; self.onMediaDetected = onMediaDetected
@@ -35,26 +36,41 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             }
         }
 
-        // ── Cloudflare challenge detection (infinite-reload guard) ──────────────
-        guard !cfBypassPending else {
-            cfBypassPending = false  // reset after bypass-reload completes
+        // ── Cloudflare: detect challenge, strip fingerprint scripts, reload ONCE ─
+        // Skip if this domain already had scripts stripped (prevents second loop)
+        let host = w.url?.host ?? ""
+        guard !cfReloadPending else {
+            cfReloadPending = false
             return
         }
+        guard !cfStrippedDomains.contains(host) else { return }
+
         w.evaluateJavaScript("""
         (function(){
             var t = document.title || '';
-            var isCF = t === 'Just a moment...'
+            return (t === 'Just a moment...'
                 || t.indexOf('Checking your browser') !== -1
                 || t.indexOf('Attention Required') !== -1
                 || !!document.querySelector('#challenge-form,.cf-browser-verification,#cf-wrapper')
-                || location.hostname === 'challenges.cloudflare.com';
-            return isCF ? '1' : '0';
+                || location.hostname === 'challenges.cloudflare.com') ? '1' : '0';
         })()
         """) { [weak self, weak w] result, _ in
-            guard let str = result as? String, str == "1", let self = self, let w = w else { return }
-            self.cfBypassPending = true
-            w.evaluateJavaScript("try{sessionStorage.setItem('__gs_cf_bypass','1');}catch(e){}")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { w.reload() }
+            guard let str = result as? String, str == "1",
+                  let self = self, let w = w else { return }
+            let domain = w.url?.host ?? ""
+            self.cfStrippedDomains.insert(domain)
+            self.cfReloadPending = true
+            // ★ KEY FIX: remove ALL user scripts so fingerprint spoofing is gone
+            let uc = w.configuration.userContentController
+            uc.removeAllUserScripts()
+            // Re-add ONLY the media-detection script (no fingerprint defense)
+            uc.addUserScript(WKUserScript(
+                source: WebViewConfigurator.injectionJS,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            ))
+            // Now reload — CF will see real Safari fingerprint → pass
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { w.reload() }
         }
     }
     func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
