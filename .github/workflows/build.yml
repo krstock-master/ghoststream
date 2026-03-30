@@ -11,6 +11,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Private Package Access
+        run: |
+          git config --global url."https://${{ secrets.CORE_PAT }}@github.com/".insteadOf "https://github.com/"
+
       - name: Setup Xcode
         run: |
           XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)

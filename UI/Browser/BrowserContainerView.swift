@@ -1,6 +1,7 @@
 // UI/Browser/BrowserContainerView.swift
 // GhostStream v0.8.0 — Chrome/Brave hybrid UI
 import SwiftUI
+import GhostStreamCore
 import WebKit
 
 struct BrowserContainerView: View {

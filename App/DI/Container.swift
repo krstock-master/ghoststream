@@ -1,5 +1,6 @@
 // App/DI/Container.swift
 import SwiftUI
+import GhostStreamCore
 
 @Observable
 final class DIContainer: @unchecked Sendable {

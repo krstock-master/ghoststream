@@ -1,5 +1,6 @@
 // Browser/BrowserWebView.swift
 import SwiftUI
+import GhostStreamCore
 import WebKit
 
 struct BrowserWebView: UIViewRepresentable {

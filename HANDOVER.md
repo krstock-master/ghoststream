@@ -3,7 +3,7 @@
 **작성일:** 2026-03-30  
 **버전:** v1.1.1 (build 20)  
 **GitHub:** github.com/krstock-master/ghoststream (Private)  
-**PAT 토큰:** <PRIVATE>  
+**PAT 토큰:** <PRIVATE - GitHub Secrets에 저장됨>  
 **번들 ID:** com.ghoststream.browser  
 **플랫폼:** iOS 17.0+ / SideStore·TrollStore Sideload  
 **코드:** 61 commits, 25 Swift files, 6,049줄, 23 릴리즈  
@@ -256,7 +256,7 @@ open GhostStream.xcodeproj
 ## 8. 다음 세션 체크리스트
 
 1. 이 인수인계서 업로드
-2. GitHub PAT 토큰: <PRIVATE>
+2. GitHub PAT 토큰: <PRIVATE - GitHub Secrets에 저장됨>
 3. 테스트 기기 iOS 버전 확인
 4. Phase 3 우선순위 피드백
 5. 사용자 피드백 전달 (있으면)

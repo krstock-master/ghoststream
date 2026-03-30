@@ -1,5 +1,6 @@
 // UI/Components/PrivacyDashboardView.swift
 import SwiftUI
+import GhostStreamCore
 
 struct PrivacyDashboardView: View {
     @Environment(PrivacyEngine.self) private var privacyEngine

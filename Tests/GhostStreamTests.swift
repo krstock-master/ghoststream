@@ -1,5 +1,6 @@
 // Tests/GhostStreamTests.swift
 import XCTest
+import GhostStreamCore
 @testable import GhostStream
 
 // MARK: - Tab Manager Tests

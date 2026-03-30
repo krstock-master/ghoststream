@@ -1,5 +1,6 @@
 // App/GhostStreamApp.swift
 import SwiftUI
+import GhostStreamCore
 
 @main
 struct GhostStreamApp: App {

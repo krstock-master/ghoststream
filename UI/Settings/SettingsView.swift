@@ -1,5 +1,6 @@
 // UI/Settings/SettingsView.swift
 import SwiftUI
+import GhostStreamCore
 import WebKit
 
 struct SettingsView: View {
