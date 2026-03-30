@@ -100,17 +100,29 @@ final class TabManager: @unchecked Sendable {
     }
 
     func closeTab(_ tab: Tab) {
-        Task { await tab.purge() }
+        // ★ F1 FIX: 마지막 탭 닫을 때 새 탭을 먼저 만들고 삭제 (크래시 방지)
+        if tabs.count <= 1 {
+            let newT = Tab(url: nil, sharedStore: sharedDataStore)
+            tabs.append(newT)
+            activeTabID = newT.id
+            // 기존 탭 비동기 제거 (ForEach 무효화 방지)
+            DispatchQueue.main.async { [weak self] in
+                Task { await tab.purge() }
+                self?.tabs.removeAll { $0.id == tab.id }
+            }
+            return
+        }
 
-        tabs.removeAll { $0.id == tab.id }
-
+        // 활성 탭을 닫는 경우 다른 탭으로 전환
         if activeTabID == tab.id {
-            activeTabID = tabs.last?.id
+            if let idx = tabs.firstIndex(where: { $0.id == tab.id }) {
+                let nextIdx = idx > 0 ? idx - 1 : min(idx + 1, tabs.count - 1)
+                activeTabID = tabs[nextIdx].id
+            }
         }
 
-        if tabs.isEmpty {
-            newTab()
-        }
+        Task { await tab.purge() }
+        tabs.removeAll { $0.id == tab.id }
     }
 
     func switchTo(_ tab: Tab) {
