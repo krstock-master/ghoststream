@@ -380,7 +380,7 @@ enum WebViewConfigurator {
                     el.style.display='none';
                     window.webkit.messageHandlers.privacyEvent.postMessage({event:'ad_blocked'});
                 }
-                if(el.className&&typeof el.className==='string'&&el.className.match(/\b(ad[-_]|ads[-_]|adv[-_]|banner|sponsor|promo|ad_bottom|ad_center|appending_promo|adcenter)\b/i)){
+                if(el.className&&typeof el.className==='string'&&el.className.match(/(^|\\s)(ad[-_]|ads[-_]|adv[-_]|banner|sponsor|promo|ad_bottom|ad_center|appending_promo|adcenter)(\\s|$)/i)){
                     el.style.display='none';
                     window.webkit.messageHandlers.privacyEvent.postMessage({event:'ad_blocked'});
                 }
