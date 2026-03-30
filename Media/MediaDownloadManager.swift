@@ -253,7 +253,7 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
 
             await MainActor.run {
                 dl.progress = Double(index + 1) / Double(totalSegments)
-                dl.bytesDownloaded = Int64(downloadedFiles.reduce(0) { $0 + (try? Data(contentsOf: $1).count ?? 0) })
+                dl.bytesDownloaded = Int64(downloadedFiles.reduce(0) { $0 + ((try? Data(contentsOf: $1))?.count ?? 0) })
             }
         }
 
