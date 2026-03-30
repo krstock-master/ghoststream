@@ -72,6 +72,13 @@ extension WebViewCoordinator {
             },
             webView.observe(\.isLoading) { [weak self] wv, _ in
                 DispatchQueue.main.async { self?.tab.isLoading = wv.isLoading }
+            },
+            // ★ F4 FIX: canGoBack/canGoForward 전용 KVO (즉각 반영)
+            webView.observe(\.canGoBack) { [weak self] wv, _ in
+                DispatchQueue.main.async { self?.tab.canGoBack = wv.canGoBack }
+            },
+            webView.observe(\.canGoForward) { [weak self] wv, _ in
+                DispatchQueue.main.async { self?.tab.canGoForward = wv.canGoForward }
             }
         ]
         objc_setAssociatedObject(self, &Self.kvoKey, obs, .OBJC_ASSOCIATION_RETAIN)

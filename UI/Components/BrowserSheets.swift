@@ -196,8 +196,6 @@ struct SamsungTabCard: View {
     let onSelect: () -> Void
     let onClose: () -> Void
 
-    @State private var pressing = false
-
     var body: some View {
         ZStack(alignment: .topTrailing) {
             // Card body
@@ -269,37 +267,15 @@ struct SamsungTabCard: View {
                     )
             )
             .shadow(color: Color.black.opacity(isActive ? 0.18 : 0.07), radius: isActive ? 8 : 3, y: 2)
-            .scaleEffect(pressing ? 0.96 : 1.0)
-            .animation(.spring(response: 0.25, dampingFraction: 0.8), value: pressing)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in pressing = true }
-                    .onEnded { _ in pressing = false }
-            )
 
-            // ── Close button ──────────────────────────────────────────
+            // ── Close button (★ F5 FIX: 명확한 터치 영역) ──────────────
             Button(action: onClose) {
-                ZStack {
-                    Circle()
-                        .fill(Color(.systemBackground))
-                        .frame(width: 22, height: 22)
-                        .shadow(color: .black.opacity(0.15), radius: 3)
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
-                }
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.secondary)
+                    .background(Circle().fill(Color(.systemBackground)).padding(3))
             }
-            .offset(x: 6, y: -6)
-
-            // ── Active indicator ──────────────────────────────────────
-            if isActive {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 16))
-                    .foregroundStyle(.teal)
-                    .background(Circle().fill(Color(.systemBackground)).padding(2))
-                    .offset(x: -8, y: -8)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-            }
+            .padding(6)
         }
     }
 }

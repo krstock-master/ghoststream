@@ -25,6 +25,8 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     // MARK: - Navigation
     func webView(_ w: WKWebView, didStartProvisionalNavigation n: WKNavigation!) {
         tab.isLoading = true; tab.isSecure = w.url?.scheme == "https"; tab.privacyReport.isHTTPS = tab.isSecure
+        // ★ F4 FIX: 네비게이션 시작 시에도 canGoBack/Forward 즉시 갱신
+        tab.canGoBack = w.canGoBack; tab.canGoForward = w.canGoForward
     }
     func webView(_ w: WKWebView, didFinish n: WKNavigation!) {
         tab.isLoading = false; tab.title = w.title ?? ""; tab.url = w.url
@@ -114,14 +116,44 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         let mime = navigationResponse.response.mimeType ?? ""
         let ext = url?.pathExtension.lowercased() ?? ""
         
-        // Direct video file navigation → trigger WKDownload
-        if ["mp4","m4v","mov","webm","mp3","m4a"].contains(ext) {
+        // ★ F2 FIX: 미디어 + 일반 파일 다운로드 트리거
+        let downloadExts = [
+            // 영상/오디오
+            "mp4","m4v","mov","webm","mp3","m4a","flac","wav","ogg","aac",
+            // 압축 파일
+            "zip","rar","7z","tar","gz","bz2",
+            // 문서
+            "pdf","doc","docx","xls","xlsx","ppt","pptx","hwp",
+            // 이미지 (직접 네비게이션 시)
+            "png","jpg","jpeg","gif","webp","heic","svg",
+            // 기타
+            "apk","ipa","dmg","exe","iso","torrent"
+        ]
+        if downloadExts.contains(ext) {
             decisionHandler(.download)
             return
         }
         
-        // Video MIME type in main frame → trigger WKDownload  
+        // Video/Audio MIME type in main frame → trigger WKDownload  
         if (mime.hasPrefix("video/") || mime.hasPrefix("audio/")) && navigationResponse.isForMainFrame {
+            decisionHandler(.download)
+            return
+        }
+
+        // ★ Content-Disposition: attachment → 무조건 다운로드
+        if let httpResponse = navigationResponse.response as? HTTPURLResponse,
+           let contentDisp = httpResponse.value(forHTTPHeaderField: "Content-Disposition"),
+           contentDisp.lowercased().contains("attachment") {
+            decisionHandler(.download)
+            return
+        }
+
+        // ★ 바이너리 MIME → 다운로드 (application/octet-stream, application/zip 등)
+        let downloadMimes = ["application/octet-stream", "application/zip", "application/x-rar",
+                             "application/x-7z-compressed", "application/pdf",
+                             "application/x-gzip", "application/x-tar",
+                             "application/vnd.android.package-archive"]
+        if downloadMimes.contains(mime.lowercased()) && navigationResponse.isForMainFrame {
             decisionHandler(.download)
             return
         }
@@ -286,12 +318,15 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
 
             // ★ 이미지 액션
             if let imgURL = imageURL {
-                actions.append(UIAction(title: "사진 저장", image: UIImage(systemName: "square.and.arrow.down")) { _ in
-                    Self.saveURLToPhotos(imgURL)
-                    NotificationCenter.default.post(name: .downloadCompleted, object: "사진 저장 중...")
+                actions.append(UIAction(title: "사진 저장", image: UIImage(systemName: "square.and.arrow.down")) { [weak self] _ in
+                    // ★ F1 FIX: WKWebView 세션 사용 (쿠키/Referer 포함 → CDN 허용)
+                    self?.startWKDownload(url: imgURL, title: "image_\(Int(Date().timeIntervalSince1970))")
                 })
-                actions.append(UIAction(title: "이미지 복사", image: UIImage(systemName: "doc.on.doc")) { _ in
-                    URLSession.shared.dataTask(with: imgURL) { data, _, _ in
+                actions.append(UIAction(title: "이미지 복사", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+                    // WKWebView 세션으로 다운로드 후 클립보드 복사
+                    var req = URLRequest(url: imgURL)
+                    req.setValue(self?.tab.url?.absoluteString ?? "", forHTTPHeaderField: "Referer")
+                    URLSession.shared.dataTask(with: req) { data, _, _ in
                         if let data = data, let img = UIImage(data: data) {
                             DispatchQueue.main.async { UIPasteboard.general.image = img }
                         }
