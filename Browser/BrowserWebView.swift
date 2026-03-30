@@ -19,11 +19,19 @@ struct BrowserWebView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
+        // ★ Fake UA 적용 (DeviceProfile과 일관된 UA)
+        webView.customUserAgent = DeviceProfileManager.shared.activeProfile.userAgent
         context.coordinator.downloadManager = downloadManager
         context.coordinator.observeWebView(webView)
         context.coordinator.webView = webView
         DispatchQueue.main.async { webViewRef = webView }
         if let url = tab.url { webView.load(URLRequest(url: url)) }
+
+        // ★ Pull-to-Refresh (Safari/Chrome 스타일)
+        let refreshControl = UIRefreshControl()
+        refreshControl.tintColor = .systemTeal
+        refreshControl.addTarget(context.coordinator, action: #selector(WebViewCoordinator.handlePullToRefresh(_:)), for: .valueChanged)
+        webView.scrollView.refreshControl = refreshControl
 
         // ★ Listen for download requests from FullscreenOverlay / snackbar
         let coord = context.coordinator

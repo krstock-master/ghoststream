@@ -166,8 +166,12 @@ struct DownloadsManagerView: View {
                                 do {
                                     try await vault.unlock()
                                     try await vault.store(fileURL: url, originalName: dl.media.title)
+                                    // ★ 보안폴더 저장 후 원본 파일 삭제
+                                    try? FileManager.default.removeItem(at: url)
+                                    // ★ 갤러리(PHAsset)에서도 삭제
+                                    await Self.deleteFromPhotoLibrary(filename: url.lastPathComponent)
                                     await MainActor.run {
-                                        NotificationCenter.default.post(name: .downloadCompleted, object: "🔒 보안 폴더에 저장 완료")
+                                        NotificationCenter.default.post(name: .downloadCompleted, object: "🔒 보안 폴더에 저장 + 원본 삭제 완료")
                                     }
                                 } catch {
                                     await MainActor.run {
@@ -225,8 +229,12 @@ struct DownloadsManagerView: View {
                             do {
                                 try await vault.unlock()
                                 try await vault.store(fileURL: url, originalName: url.lastPathComponent)
+                                // ★ 보안폴더 저장 후 원본 파일 삭제
+                                try? FileManager.default.removeItem(at: url)
+                                // ★ 갤러리(PHAsset)에서도 삭제
+                                await Self.deleteFromPhotoLibrary(filename: url.lastPathComponent)
                                 await MainActor.run {
-                                    NotificationCenter.default.post(name: .downloadCompleted, object: "🔒 보안 폴더에 저장 완료")
+                                    NotificationCenter.default.post(name: .downloadCompleted, object: "🔒 보안 폴더에 이동 + 원본 삭제 완료")
                                 }
                             } catch {
                                 await MainActor.run {
@@ -452,6 +460,33 @@ struct DownloadsManagerView: View {
         if ext == "gif" { return "photo" }
         if ["png","jpg","jpeg","webp"].contains(ext) { return "photo" }
         return "doc"
+    }
+
+    // ★ 보안폴더 이동 시 갤러리에서 해당 파일 삭제
+    static func deleteFromPhotoLibrary(filename: String) async {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .authorized || status == .limited else { return }
+
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        fetchOptions.fetchLimit = 20 // 최근 20개만 검색
+
+        let assets = PHAsset.fetchAssets(with: fetchOptions)
+        var toDelete: [PHAsset] = []
+        assets.enumerateObjects { asset, _, _ in
+            let resources = PHAssetResource.assetResources(for: asset)
+            for r in resources {
+                if r.originalFilename == filename || r.originalFilename.contains(filename.replacingOccurrences(of: " ", with: "_")) {
+                    toDelete.append(asset)
+                    return
+                }
+            }
+        }
+
+        guard !toDelete.isEmpty else { return }
+        try? await PHPhotoLibrary.shared().performChanges {
+            PHAssetChangeRequest.deleteAssets(toDelete as NSFastEnumeration)
+        }
     }
 }
 // MARK: - VideoPlayerSheet
