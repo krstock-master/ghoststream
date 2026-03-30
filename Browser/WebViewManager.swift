@@ -116,7 +116,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         let mime = navigationResponse.response.mimeType ?? ""
         let ext = url?.pathExtension.lowercased() ?? ""
         
-        // ★ F2 FIX: 미디어 + 일반 파일 다운로드 트리거
+        // ★ F2/F3 FIX: 미디어/파일 다운로드 (이미지는 제외 — 네비게이션 시 표시만)
         let downloadExts = [
             // 영상/오디오
             "mp4","m4v","mov","webm","mp3","m4a","flac","wav","ogg","aac",
@@ -124,10 +124,9 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             "zip","rar","7z","tar","gz","bz2",
             // 문서
             "pdf","doc","docx","xls","xlsx","ppt","pptx","hwp",
-            // 이미지 (직접 네비게이션 시)
-            "png","jpg","jpeg","gif","webp","heic","svg",
             // 기타
             "apk","ipa","dmg","exe","iso","torrent"
+            // ★ 이미지는 제외 (png/jpg/gif → 브라우저에서 표시, 사용자가 꾹 눌러 저장)
         ]
         if downloadExts.contains(ext) {
             decisionHandler(.download)
@@ -287,68 +286,28 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         }
     }
 
-    // MARK: - Context Menu (long-press) — 방법 1: Long Tap 다운로드
+    // MARK: - Context Menu (long-press)
     func webView(_ webView: WKWebView, contextMenuConfigurationFor elementInfo: WKContextMenuElementInfo) async -> UIContextMenuConfiguration? {
-        // ★ F3 FIX: 이미지/링크 모두 처리
         let linkURL = elementInfo.linkURL
 
-        // JS로 현재 포인트의 요소 타입 확인 (이미지인지)
-        let imgResult = try? await webView.evaluateJavaScript("""
-        (function(){
-            var els=document.querySelectorAll(':hover');
-            for(var i=els.length-1;i>=0;i--){
-                var el=els[i];
-                if(el.tagName==='IMG'&&el.src&&!el.src.startsWith('data:'))return el.src;
-                if(el.style&&el.style.backgroundImage){
-                    var m=el.style.backgroundImage.match(/url\\(["']?([^"')]+)/);
-                    if(m)return m[1];
-                }
-            }
-            return '';
-        })()
-        """)
-        let imageURLStr = imgResult as? String
-        let imageURL = imageURLStr.flatMap { $0.isEmpty ? nil : URL(string: $0) }
-
-        // 이미지도 링크도 없으면 기본 메뉴
-        guard linkURL != nil || imageURL != nil else { return nil }
+        // ★ F2 FIX: 링크가 없으면 iOS 기본 메뉴 사용 (Save Photo 등 네이티브)
+        guard let linkURL = linkURL else { return nil }
 
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
             var actions: [UIAction] = []
 
-            // ★ 이미지 액션
-            if let imgURL = imageURL {
-                actions.append(UIAction(title: "사진 저장", image: UIImage(systemName: "square.and.arrow.down")) { [weak self] _ in
-                    // ★ F1 FIX: WKWebView 세션 사용 (쿠키/Referer 포함 → CDN 허용)
-                    self?.startWKDownload(url: imgURL, title: "image_\(Int(Date().timeIntervalSince1970))")
-                })
-                actions.append(UIAction(title: "이미지 복사", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
-                    // WKWebView 세션으로 다운로드 후 클립보드 복사
-                    var req = URLRequest(url: imgURL)
-                    req.setValue(self?.tab.url?.absoluteString ?? "", forHTTPHeaderField: "Referer")
-                    URLSession.shared.dataTask(with: req) { data, _, _ in
-                        if let data = data, let img = UIImage(data: data) {
-                            DispatchQueue.main.async { UIPasteboard.general.image = img }
-                        }
-                    }.resume()
+            actions.append(UIAction(title: "새 탭에서 열기", image: UIImage(systemName: "plus.square.on.square")) { _ in
+                NotificationCenter.default.post(name: .openInNewTab, object: linkURL)
+            })
+            let ext = linkURL.pathExtension.lowercased()
+            if ["mp4","m4v","mov","webm","gif","m3u8","png","jpg","jpeg","webp","zip","rar","pdf"].contains(ext) {
+                actions.append(UIAction(title: "다운로드", image: UIImage(systemName: "arrow.down.circle.fill")) { [weak self] _ in
+                    self?.startWKDownload(url: linkURL, title: linkURL.deletingPathExtension().lastPathComponent)
                 })
             }
-
-            // ★ 링크 액션
-            if let linkURL = linkURL {
-                actions.append(UIAction(title: "새 탭에서 열기", image: UIImage(systemName: "plus.square.on.square")) { _ in
-                    NotificationCenter.default.post(name: .openInNewTab, object: linkURL)
-                })
-                let ext = linkURL.pathExtension.lowercased()
-                if ["mp4","m4v","mov","webm","gif","m3u8","png","jpg","jpeg","webp"].contains(ext) {
-                    actions.append(UIAction(title: "다운로드", image: UIImage(systemName: "arrow.down.circle.fill")) { [weak self] _ in
-                        self?.startWKDownload(url: linkURL, title: linkURL.deletingPathExtension().lastPathComponent)
-                    })
-                }
-                actions.append(UIAction(title: "링크 복사", image: UIImage(systemName: "doc.on.doc")) { _ in
-                    UIPasteboard.general.url = linkURL
-                })
-            }
+            actions.append(UIAction(title: "링크 복사", image: UIImage(systemName: "doc.on.doc")) { _ in
+                UIPasteboard.general.url = linkURL
+            })
 
             return UIMenu(children: actions)
         }
