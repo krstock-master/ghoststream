@@ -1,5 +1,6 @@
 // UI/Settings/SettingsView.swift
 import SwiftUI
+import WebKit
 
 struct SettingsView: View {
     @Environment(DIContainer.self) private var container
@@ -10,43 +11,69 @@ struct SettingsView: View {
     @AppStorage("defaultQuality") private var defaultQuality = "720p"
     @AppStorage("autoLockVault") private var autoLockVault = true
     @AppStorage("searchEngine") private var searchEngine = "DuckDuckGo"
+    @AppStorage("autoSaveToGallery") private var autoSaveToGallery = true
+    @AppStorage("forceDarkWeb") private var forceDarkWeb = false
+    @State private var showClearAlert = false
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Toggle("광고 차단", isOn: $blockAds)
-                    Toggle("트래커 차단", isOn: $blockTrackers)
-                    Toggle("핑거프린팅 방어", isOn: $blockFingerprinting)
-                    NavigationLink("Privacy DNS") { DoHSettingsView() }
+                    Toggle(isOn: $blockAds) { Label("광고 차단", systemImage: "eye.slash") }
+                    Toggle(isOn: $blockTrackers) { Label("트래커 차단", systemImage: "hand.raised.fill") }
+                    Toggle(isOn: $blockFingerprinting) { Label("핑거프린팅 방어", systemImage: "fingerprint") }
+                    NavigationLink { DoHSettingsView() } label: { Label("Privacy DNS (DoH)", systemImage: "network.badge.shield.half.filled") }
                     HStack {
-                        Text("차단 룰 수"); Spacer()
-                        Text("\(container.contentBlocker.ruleCount)개").foregroundStyle(.secondary)
+                        Label("차단 규칙", systemImage: "list.bullet.rectangle.portrait"); Spacer()
+                        Text("\(container.contentBlocker.ruleCount)개").foregroundStyle(.secondary).font(.subheadline)
                     }
-                } header: { Label("프라이버시", systemImage: "shield.checkered") }
+                } header: { Text("프라이버시 & 보안") } footer: { Text("광고, 트래커, 핑거프린팅을 차단합니다.") }
 
                 Section {
-                    Picker("기본 화질", selection: $defaultQuality) {
-                        Text("1080p").tag("1080p"); Text("720p").tag("720p"); Text("480p").tag("480p")
-                    }
-                    Toggle("Vault 자동 잠금", isOn: $autoLockVault)
-                } header: { Label("다운로드", systemImage: "arrow.down.circle") }
+                    Toggle(isOn: $autoSaveToGallery) { Label("다운로드 후 자동 갤러리 저장", systemImage: "photo.badge.arrow.down") }
+                    Picker(selection: $defaultQuality) {
+                        Text("1080p").tag("1080p"); Text("720p").tag("720p"); Text("480p").tag("480p"); Text("자동").tag("Auto")
+                    } label: { Label("기본 화질", systemImage: "dial.medium") }
+                    Toggle(isOn: $autoLockVault) { Label("보안 폴더 자동 잠금", systemImage: "lock.shield") }
+                } header: { Text("다운로드 & 저장") } footer: { Text("다운로드 완료 시 자동으로 사진 앱에 저장됩니다.") }
 
                 Section {
-                    Picker("검색 엔진", selection: $searchEngine) {
+                    Picker(selection: $searchEngine) {
                         Text("DuckDuckGo").tag("DuckDuckGo"); Text("Brave Search").tag("Brave")
                         Text("Google").tag("Google"); Text("Naver").tag("Naver")
-                    }
-                } header: { Label("검색", systemImage: "magnifyingglass") }
+                    } label: { Label("검색 엔진", systemImage: "magnifyingglass") }
+                    Toggle(isOn: $forceDarkWeb) { Label("웹 다크 모드 (강제)", systemImage: "moon.fill") }
+                } header: { Text("검색 & 브라우저") }
 
                 Section {
-                    HStack { Text("버전"); Spacer(); Text("\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") (빌드 \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))").foregroundStyle(.secondary) }
-                    NavigationLink("개인정보처리방침") { PrivacyPolicyView() }
-                    NavigationLink("오픈소스 라이선스") { LicensesView() }
-                } header: { Label("정보", systemImage: "info.circle") }
+                    Button(role: .destructive) { showClearAlert = true } label: {
+                        Label("브라우징 데이터 삭제", systemImage: "trash").foregroundStyle(.red)
+                    }
+                } header: { Text("데이터 관리") } footer: { Text("쿠키, 캐시를 삭제합니다. 다운로드 파일은 유지.") }
+
+                Section {
+                    HStack {
+                        Label("버전", systemImage: "info.circle"); Spacer()
+                        Text("\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") (빌드 \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))")
+                            .foregroundStyle(.secondary).font(.subheadline)
+                    }
+                    NavigationLink { PrivacyPolicyView() } label: { Label("개인정보처리방침", systemImage: "hand.raised") }
+                    NavigationLink { LicensesView() } label: { Label("오픈소스 라이선스", systemImage: "doc.text") }
+                } header: { Text("정보") }
             }
             .navigationTitle("설정").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("완료") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("완료") { dismiss() }.fontWeight(.semibold) } }
+            .alert("브라우징 데이터 삭제", isPresented: $showClearAlert) {
+                Button("삭제", role: .destructive) { clearBrowsingData() }
+                Button("취소", role: .cancel) {}
+            } message: { Text("쿠키, 캐시, 로컬 스토리지가 삭제됩니다.") }
+        }
+    }
+
+    private func clearBrowsingData() {
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        WKWebsiteDataStore.default().removeData(ofTypes: types, modifiedSince: .distantPast) {
+            NotificationCenter.default.post(name: .downloadCompleted, object: "브라우징 데이터 삭제 완료")
         }
     }
 }
@@ -60,7 +87,7 @@ struct DoHSettingsView: View {
                     Task { await dns.apply(provider: provider) }
                 } label: {
                     HStack(spacing: 12) {
-                        Image(systemName: provider.icon).foregroundStyle(dns.activeProvider == provider ? .green : .gray).frame(width: 24)
+                        Image(systemName: provider.icon).foregroundStyle(dns.activeProvider == provider ? .green : .gray).frame(width: 28)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(provider.rawValue).foregroundStyle(.primary)
                             if !provider.serverURL.isEmpty { Text(provider.serverURL).font(.caption).foregroundStyle(.secondary) }
@@ -77,15 +104,32 @@ struct DoHSettingsView: View {
 struct PrivacyPolicyView: View {
     var body: some View {
         ScrollView {
-            Text("GhostStream은 사용자의 프라이버시를 최우선으로 합니다.\n\n1. 로컬 온니: 모든 데이터는 기기에만 저장됩니다.\n2. 서버리스: 자체 서버에 어떠한 사용자 데이터도 전송하지 않습니다.\n3. SDK 제로: Firebase, Facebook SDK 등 제3자 분석 도구를 일절 사용하지 않습니다.\n4. 최소 권한: 카메라, 연락처, 위치 권한을 요청하지 않습니다.")
-                .padding()
+            VStack(alignment: .leading, spacing: 16) {
+                policyItem("1", "로컬 전용", "모든 데이터는 기기에만 저장됩니다.")
+                policyItem("2", "서버리스", "자체 서버 없음. 사용자 데이터 미수집.")
+                policyItem("3", "SDK 제로", "Firebase, Facebook SDK 등 미사용.")
+                policyItem("4", "최소 권한", "카메라, 연락처, 위치 권한 미요청.")
+                policyItem("5", "탭 격리", "각 탭의 쿠키는 서로 격리됩니다.")
+                policyItem("6", "AES-256 암호화", "보안 폴더 파일은 AES-256-GCM 암호화.")
+            }.padding()
         }.navigationTitle("개인정보처리방침").navigationBarTitleDisplayMode(.inline)
+    }
+    private func policyItem(_ num: String, _ title: String, _ desc: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(num).font(.headline).foregroundStyle(.teal)
+                .frame(width: 28, height: 28).background(.teal.opacity(0.1), in: Circle())
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline)
+                Text(desc).font(.subheadline).foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
 struct LicensesView: View {
     var body: some View {
-        List { ForEach(["WebKit (Apple)", "CryptoKit (Apple)", "CommonCrypto (Apple)"], id: \.self) { Text($0) } }
-            .navigationTitle("오픈소스 라이선스")
+        List {
+            ForEach(["WebKit (Apple)", "CryptoKit (Apple)", "CommonCrypto (Apple)", "SwiftUI (Apple)"], id: \.self) { Text($0) }
+        }.navigationTitle("오픈소스 라이선스")
     }
 }

@@ -21,7 +21,6 @@ struct BrowserContainerView: View {
     @State private var isAddressEditing = false
     @State private var toastMessage: String?
     @State private var toastIsError = false
-    @State private var mediaCount: Int = 0
     @FocusState private var isURLFieldFocused: Bool
 
     var body: some View {
@@ -29,23 +28,13 @@ struct BrowserContainerView: View {
             VStack(spacing: 0) {
                 if isElementHideMode { elementHideBanner }
                 if isAddressEditing { topSearchBar }
-                ZStack(alignment: .bottomTrailing) {
-                    webArea.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if !isAddressEditing && mediaCount > 0 {
-                        mediaFAB.padding(.trailing, 16).padding(.bottom, 16)
-                            .transition(.scale.combined(with: .opacity))
-                    }
-                }
+                webArea.frame(maxWidth: .infinity, maxHeight: .infinity)
                 if !isAddressEditing { bottomToolbar }
             }
         }
         .background(Color(.systemBackground))
         .onChange(of: tabManager.activeTab?.url) { _, url in
             if !isAddressEditing { addressText = url?.absoluteString ?? "" }
-            mediaCount = 0
-        }
-        .onChange(of: tabManager.activeTab?.detectedMedia.count) { _, count in
-            withAnimation(.spring(response: 0.3)) { mediaCount = count ?? 0 }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openInNewTab)) { n in
             if let url = n.object as? URL { tabManager.newTab(url: url) }
@@ -159,27 +148,6 @@ struct BrowserContainerView: View {
         }
     }
 
-    private var mediaFAB: some View {
-        Button { showDownloads = true } label: {
-            ZStack(alignment: .topTrailing) {
-                Circle().fill(.teal).frame(width: 52, height: 52)
-                    .shadow(color: .teal.opacity(0.4), radius: 10, y: 4)
-                    .overlay {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.system(size: 24)).foregroundStyle(.white)
-                    }
-                if mediaCount > 0 {
-                    Text("\(min(mediaCount, 99))")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(minWidth: 18, minHeight: 18)
-                        .background(.red, in: Circle())
-                        .offset(x: 4, y: -4)
-                }
-            }
-        }
-    }
-
     private func snackbar(_ media: DetectedMedia) -> some View {
         Button {
             // ★ WKDownload 경로로 — URLSession 대신 브라우저 세션 사용
@@ -251,10 +219,51 @@ struct BrowserContainerView: View {
                 .background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: 26))
             }
             .padding(.horizontal, 14).padding(.top, 8)
-            // 5-button bar
+            // 5-button bar: ← → ⬇️ □ ⋯
             HStack(spacing: 0) {
-                tBtn("chevron.left", tabManager.activeTab?.canGoBack == true) { webViewRef?.goBack() }
-                tBtn("chevron.right", tabManager.activeTab?.canGoForward == true) { webViewRef?.goForward() }
+                // ★ Fix 6: 뒤로가기 — disabled 대신 opacity로 처리 (터치 영역 유지)
+                Button {
+                    webViewRef?.goBack()
+                } label: {
+                    Image(systemName: "chevron.left").font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(tabManager.activeTab?.canGoBack == true ? Color.primary : Color.primary.opacity(0.2))
+                        .frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
+                }
+
+                // 앞으로가기
+                Button {
+                    webViewRef?.goForward()
+                } label: {
+                    Image(systemName: "chevron.right").font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(tabManager.activeTab?.canGoForward == true ? Color.primary : Color.primary.opacity(0.2))
+                        .frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
+                }
+
+                // ★ Fix 4: 다운로드 버튼 (FAB 대체 → 하단 바에 배지)
+                Button { showDownloads = true } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "arrow.down.circle").font(.system(size: 18, weight: .medium))
+                            .frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
+                        if downloadManager.downloads.count + downloadManager.completedDownloads.count > 0 {
+                            Text("\(downloadManager.downloads.count + downloadManager.completedDownloads.count)")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(minWidth: 16, minHeight: 16)
+                                .background(.red, in: Circle())
+                                .offset(x: -10, y: 8)
+                        }
+                    }
+                }
+
+                // 탭
+                Button { showTabGrid = true } label: {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 5.5).stroke(Color.primary.opacity(0.55), lineWidth: 1.5).frame(width: 22, height: 22)
+                        Text("\(tabManager.tabs.count)").font(.system(size: 12, weight: .semibold, design: .rounded))
+                    }.frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
+                }
+
+                // 메뉴 (⋯)
                 Menu {
                     Section("탭") {
                         Button { tabManager.newTab() } label: { Label("새 탭", systemImage: "plus.square") }
@@ -262,11 +271,10 @@ struct BrowserContainerView: View {
                     }
                     Section("도구") {
                         Button { webViewRef?.reload() } label: { Label("새로고침", systemImage: "arrow.clockwise") }
-                        Button { showDownloads = true } label: { Label("다운로드", systemImage: "arrow.down.circle") }
                         Button { isElementHideMode = true; webViewRef?.evaluateJavaScript("window._gsToggleHideMode()") } label: { Label("요소 가리기", systemImage: "eye.slash") }
                         Button { if let h = tabManager.activeTab?.url?.host { ElementHiderStore.shared.clearRules(for: h); webViewRef?.reload() } } label: { Label("숨긴 요소 복원", systemImage: "eye") }
                     }
-                    Section("보안") {
+                    Section {
                         Button { showPrivacy = true } label: { Label("프라이버시 리포트", systemImage: "shield.checkered") }
                         Button { showSettings = true } label: { Label("설정", systemImage: "gearshape") }
                     }
@@ -274,16 +282,6 @@ struct BrowserContainerView: View {
                         Section { ShareLink(item: url) { Label("페이지 공유", systemImage: "square.and.arrow.up") } }
                     }
                 } label: {
-                    Image(systemName: "square.and.arrow.up").font(.system(size: 18))
-                        .frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
-                }
-                Button { showTabGrid = true } label: {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 5.5).stroke(Color.primary.opacity(0.55), lineWidth: 1.5).frame(width: 22, height: 22)
-                        Text("\(tabManager.tabs.count)").font(.system(size: 12, weight: .semibold, design: .rounded))
-                    }.frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
-                }
-                Button { showSettings = true } label: {
                     Image(systemName: "ellipsis").font(.system(size: 18, weight: .medium))
                         .frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
                 }
@@ -291,13 +289,7 @@ struct BrowserContainerView: View {
         }.background(.ultraThinMaterial)
     }
 
-    private func tBtn(_ icon: String, _ on: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon).font(.system(size: 18, weight: .medium))
-                .foregroundStyle(on ? Color.primary : Color.primary.opacity(0.2))
-                .frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
-        }.disabled(!on)
-    }
+    // MARK: - Helpers (removed old tBtn — inlined above for fix 6)
 
     private func navigateTo(_ input: String) {
         let t = input.trimmingCharacters(in: .whitespaces); guard !t.isEmpty else { return }

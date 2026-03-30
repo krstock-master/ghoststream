@@ -148,14 +148,44 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
 
     func downloadDidFinish(_ download: WKDownload) {
         let title = activeWKDownloads.removeValue(forKey: download) ?? pendingDownloadFilename ?? "파일"
-        // Check file size
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Downloads", isDirectory: true)
         if let fname = pendingDownloadFilename {
             let filePath = dir.appendingPathComponent(fname)
             let size = (try? FileManager.default.attributesOfItem(atPath: filePath.path)[.size] as? Int) ?? 0
             let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
-            NotificationCenter.default.post(name: .downloadCompleted, object: "✅ \(title) 다운로드 완료 (\(sizeStr))")
+
+            // ★ 자동 갤러리 저장 (피드백 1)
+            let ext = filePath.pathExtension.lowercased()
+            let isVideo = ["mp4","m4v","mov","webm"].contains(ext)
+            let isImage = ["jpg","jpeg","png","webp","heic","gif"].contains(ext)
+            if (isVideo || isImage) && size > 1024 {
+                PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                    guard status == .authorized || status == .limited else { return }
+                    PHPhotoLibrary.shared().performChanges({
+                        let req = PHAssetCreationRequest.forAsset()
+                        if isVideo {
+                            req.addResource(with: .video, fileURL: filePath, options: nil)
+                        } else if ext == "gif", let data = try? Data(contentsOf: filePath) {
+                            req.addResource(with: .photo, data: data, options: nil)
+                        } else if let data = try? Data(contentsOf: filePath) {
+                            req.addResource(with: .photo, data: data, options: nil)
+                        }
+                    }) { success, _ in
+                        DispatchQueue.main.async {
+                            if success {
+                                NotificationCenter.default.post(name: .downloadCompleted,
+                                    object: "✅ \(title) 다운로드 + 갤러리 저장 완료 (\(sizeStr))")
+                            } else {
+                                NotificationCenter.default.post(name: .downloadCompleted,
+                                    object: "✅ \(title) 다운로드 완료 (\(sizeStr)) — 갤러리 저장은 수동으로")
+                            }
+                        }
+                    }
+                }
+            } else {
+                NotificationCenter.default.post(name: .downloadCompleted, object: "✅ \(title) 다운로드 완료 (\(sizeStr))")
+            }
         } else {
             NotificationCenter.default.post(name: .downloadCompleted, object: "✅ \(title) 다운로드 완료")
         }
