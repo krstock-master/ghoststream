@@ -8,24 +8,34 @@ import WebKit
 final class PrivacyEngine: @unchecked Sendable {
     let contentBlocker: ContentBlockerManager
     var isEnabled: Bool = true
-    var totalTrackersBlocked: Int = 0
-    var totalAdsBlocked: Int = 0
-    var totalFingerprintDefenses: Int = 0
+    var totalTrackersBlocked: Int {
+        didSet { UserDefaults.standard.set(totalTrackersBlocked, forKey: "gs_totalTrackers") }
+    }
+    var totalAdsBlocked: Int {
+        didSet { UserDefaults.standard.set(totalAdsBlocked, forKey: "gs_totalAds") }
+    }
+    var totalFingerprintDefenses: Int {
+        didSet { UserDefaults.standard.set(totalFingerprintDefenses, forKey: "gs_totalFP") }
+    }
 
     init(contentBlocker: ContentBlockerManager) {
         self.contentBlocker = contentBlocker
+        self.totalTrackersBlocked = UserDefaults.standard.integer(forKey: "gs_totalTrackers")
+        self.totalAdsBlocked = UserDefaults.standard.integer(forKey: "gs_totalAds")
+        self.totalFingerprintDefenses = UserDefaults.standard.integer(forKey: "gs_totalFP")
     }
 
     // MARK: - Fingerprint Defense JS
 
     var fingerprintDefenseScript: String? {
         guard isEnabled else { return nil }
-        return Self.fingerprintDefenseJS
+        return Self.buildFingerprintDefenseJS(profile: DeviceProfileManager.shared.activeProfile)
     }
 
-    // MARK: - Complete Fingerprint Defense (7-vector)
+    // MARK: - Complete Fingerprint Defense (11-vector, 프로필 기반)
 
-    private static let fingerprintDefenseJS = """
+    static func buildFingerprintDefenseJS(profile: DeviceProfile) -> String {
+        return """
     (function() {
         "use strict";
         
@@ -48,7 +58,9 @@ final class PrivacyEngine: @unchecked Sendable {
             } catch(e) {}
         }
         
-        // 1. Canvas 노이즈
+        // 1. Canvas 노이즈 (세션 고정 시드)
+        var _seed = \(Int.random(in: 1000...9999));
+        function seededRand(i) { var x = Math.sin(_seed + i) * 10000; return x - Math.floor(x); }
         var _getCtx = HTMLCanvasElement.prototype.getContext;
         HTMLCanvasElement.prototype.getContext = function(type) {
             var ctx = _getCtx.apply(this, arguments);
@@ -58,8 +70,8 @@ final class PrivacyEngine: @unchecked Sendable {
                 notifyNative("fingerprint_attempt");
                 var d = _getImageData(x, y, w, h);
                 for (var i = 0; i < d.data.length; i += 4) {
-                    d.data[i] ^= Math.random() > 0.5 ? 1 : 0;
-                    d.data[i+1] ^= Math.random() > 0.5 ? 1 : 0;
+                    d.data[i] ^= seededRand(i) > 0.5 ? 1 : 0;
+                    d.data[i+1] ^= seededRand(i+1) > 0.5 ? 1 : 0;
                 }
                 return d;
             };
@@ -97,7 +109,7 @@ final class PrivacyEngine: @unchecked Sendable {
                     _getFloat(arr);
                     notifyNative("fingerprint_attempt");
                     for (var i = 0; i < arr.length; i++) {
-                        arr[i] += (Math.random() - 0.5) * 0.0001;
+                        arr[i] += (seededRand(i) - 0.5) * 0.0001;
                     }
                 };
                 return node;
@@ -108,7 +120,6 @@ final class PrivacyEngine: @unchecked Sendable {
         var _measureText = CanvasRenderingContext2D.prototype.measureText;
         CanvasRenderingContext2D.prototype.measureText = function(text) {
             var result = _measureText.call(this, text);
-            // 미세한 노이즈를 추가하여 폰트 목록 추론 차단
             var w = result.width;
             Object.defineProperty(result, "width", {
                 get: function() { return Math.round(w * 100) / 100; }
@@ -116,44 +127,84 @@ final class PrivacyEngine: @unchecked Sendable {
             return result;
         };
         
-        // 5. Navigator 속성 고정 (일반 iPhone 프로필)
+        // 5. Navigator 속성 고정 (프로필 기반 — UA와 일관)
         try {
             Object.defineProperties(navigator, {
                 plugins: { get: function() { return []; } },
                 languages: { get: function() { return ["ko-KR", "ko", "en-US", "en"]; } },
-                hardwareConcurrency: { get: function() { return 4; } },
+                hardwareConcurrency: { get: function() { return \(profile.hardwareConcurrency); } },
                 deviceMemory: { get: function() { return 4; } },
-                maxTouchPoints: { get: function() { return 5; } },
+                maxTouchPoints: { get: function() { return \(profile.maxTouchPoints); } },
             });
         } catch(e) {}
         
-        // 6. Screen 속성 고정
+        // 6. Screen 속성 고정 (프로필 기반 — UA와 일관)
         try {
             Object.defineProperties(screen, {
-                width: { get: function() { return 390; } },
-                height: { get: function() { return 844; } },
-                availWidth: { get: function() { return 390; } },
-                availHeight: { get: function() { return 844; } },
+                width: { get: function() { return \(profile.screenWidth); } },
+                height: { get: function() { return \(profile.screenHeight); } },
+                availWidth: { get: function() { return \(profile.screenWidth); } },
+                availHeight: { get: function() { return \(profile.screenHeight); } },
                 colorDepth: { get: function() { return 24; } },
                 pixelDepth: { get: function() { return 24; } },
             });
             Object.defineProperty(window, "devicePixelRatio", {
-                get: function() { return 3; }
+                get: function() { return \(profile.pixelRatio); }
             });
         } catch(e) {}
         
         // 7. 고정밀 타이머 해상도 저하
         var _now = performance.now.bind(performance);
         performance.now = function() {
-            return Math.round(_now());  // 1ms 단위로 반올림
+            return Math.round(_now());
         };
         
-        // Bonus: Battery API 차단
+        // 8. Battery API 차단
         if (navigator.getBattery) {
             navigator.getBattery = function() {
                 return Promise.reject(new Error("Battery API disabled"));
             };
         }
+        
+        // ★ 9. WebRTC IP 누출 차단
+        try {
+            var _RTCPeer = window.RTCPeerConnection || window.webkitRTCPeerConnection;
+            if (_RTCPeer) {
+                window.RTCPeerConnection = function(config) {
+                    notifyNative("fingerprint_attempt");
+                    if (config && config.iceServers) {
+                        config.iceServers = []; // STUN/TURN 서버 제거 → 로컬 IP 노출 차단
+                    }
+                    return new _RTCPeer(config);
+                };
+                window.RTCPeerConnection.prototype = _RTCPeer.prototype;
+                if (window.webkitRTCPeerConnection) window.webkitRTCPeerConnection = window.RTCPeerConnection;
+            }
+        } catch(e) {}
+        
+        // ★ 10. NetworkInformation API 스푸핑
+        try {
+            if (navigator.connection) {
+                Object.defineProperties(navigator.connection, {
+                    effectiveType: { get: function() { return "4g"; } },
+                    downlink: { get: function() { return 10; } },
+                    rtt: { get: function() { return 50; } },
+                    saveData: { get: function() { return false; } },
+                });
+            }
+        } catch(e) {}
+        
+        // ★ 11. Speech Synthesis 핑거프린트 방어
+        try {
+            if (window.speechSynthesis && window.speechSynthesis.getVoices) {
+                var _getVoices = window.speechSynthesis.getVoices.bind(window.speechSynthesis);
+                window.speechSynthesis.getVoices = function() {
+                    notifyNative("fingerprint_attempt");
+                    return []; // 빈 배열 반환 → 음성 목록 기반 핑거프린팅 차단
+                };
+            }
+        } catch(e) {}
     })();
     """
+    }
 }

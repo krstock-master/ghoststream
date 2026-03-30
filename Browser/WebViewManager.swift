@@ -209,6 +209,14 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         if a.targetFrame == nil { w.load(a.request) }; return nil
     }
 
+    // MARK: - Pull-to-Refresh
+    @objc func handlePullToRefresh(_ sender: UIRefreshControl) {
+        webView?.reload()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            sender.endRefreshing()
+        }
+    }
+
     // MARK: - Context Menu (long-press) — 방법 1: Long Tap 다운로드
     func webView(_ webView: WKWebView, contextMenuConfigurationFor elementInfo: WKContextMenuElementInfo) async -> UIContextMenuConfiguration? {
         guard let linkURL = elementInfo.linkURL else { return nil }
@@ -309,8 +317,18 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             if let sel = dict["selector"] as? String, let host = tab.url?.host { ElementHiderStore.shared.addRule(sel, for: host) }
         case "privacyEvent":
             if let ev = dict["event"] as? String {
-                switch ev { case "fingerprint_attempt": tab.privacyReport.fingerprintAttempts += 1
-                case "tracker_blocked": tab.privacyReport.trackersBlocked += 1; case "ad_blocked": tab.privacyReport.adsBlocked += 1; default: break }
+                switch ev {
+                case "fingerprint_attempt":
+                    tab.privacyReport.fingerprintAttempts += 1
+                    privacyEngine.totalFingerprintDefenses += 1
+                case "tracker_blocked":
+                    tab.privacyReport.trackersBlocked += 1
+                    privacyEngine.totalTrackersBlocked += 1
+                case "ad_blocked":
+                    tab.privacyReport.adsBlocked += 1
+                    privacyEngine.totalAdsBlocked += 1
+                default: break
+                }
             }
         default: break
         }
@@ -723,6 +741,45 @@ enum WebViewConfigurator {
 
     // ★ Run + periodic rescan
     scanAll();setTimeout(scanAll,1000);setTimeout(scanAll,3000);setTimeout(scanAll,6000);
+
+    // ★ Cookie Banner 자동 거부 (Brave/DuckDuckGo 스타일)
+    function dismissCookieBanners(){
+        // 1. CSS로 일반적인 쿠키 배너 숨기기
+        var bannerSels=[
+            '#cookie-banner','#cookie-consent','#cookieConsent','#gdpr-banner',
+            '.cookie-banner','.cookie-consent','.cookie-notice','.cookie-popup',
+            '.gdpr-banner','.gdpr-consent','.consent-banner','.consent-popup',
+            '#onetrust-banner-sdk','#CybotCookiebotDialog','.cc-window',
+            '#cookie-law-info-bar','.js-cookie-consent','.eupopup',
+            '[class*="cookie-banner"]','[class*="consent-banner"]',
+            '[id*="cookie-notice"]','[id*="cookie-popup"]'
+        ];
+        bannerSels.forEach(function(sel){
+            document.querySelectorAll(sel).forEach(function(el){
+                el.style.display='none';el.remove();
+            });
+        });
+        // 2. "거부"/"Reject"/"Decline" 버튼 자동 클릭
+        var rejectPatterns=[/거부/,/모두\\s*거부/,/reject\\s*all/i,/decline/i,/refuse/i,/deny/i,/only\\s*necessary/i,/필수만/,/only\\s*essential/i];
+        document.querySelectorAll('button,a[role="button"],.btn,[class*="reject"],[class*="decline"]').forEach(function(btn){
+            var txt=(btn.textContent||'').trim();
+            for(var i=0;i<rejectPatterns.length;i++){
+                if(rejectPatterns[i].test(txt)){
+                    try{btn.click();}catch(e){}
+                    return;
+                }
+            }
+        });
+        // 3. 배경 오버레이 제거
+        document.querySelectorAll('.cookie-overlay,[class*="consent-overlay"],[class*="gdpr-overlay"]').forEach(function(el){
+            el.style.display='none';el.remove();
+        });
+        // body overflow 복원
+        if(document.body.style.overflow==='hidden')document.body.style.overflow='';
+    }
+    setTimeout(dismissCookieBanners,500);
+    setTimeout(dismissCookieBanners,2000);
+    setTimeout(dismissCookieBanners,5000);
     setInterval(function(){
         document.querySelectorAll('video').forEach(function(v){
             if(!v.dataset.gsB)addBtn(v);

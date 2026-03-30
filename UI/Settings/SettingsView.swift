@@ -13,6 +13,8 @@ struct SettingsView: View {
     @AppStorage("searchEngine") private var searchEngine = "DuckDuckGo"
     @AppStorage("autoSaveToGallery") private var autoSaveToGallery = true
     @AppStorage("appTheme") private var appTheme = "system"
+    @AppStorage("addressBarPosition") private var addressBarBottom = true
+    @AppStorage("autoDismissCookies") private var autoDismissCookies = true
     @State private var showClearAlert = false
 
     var body: some View {
@@ -28,6 +30,25 @@ struct SettingsView: View {
                         Text("\(container.contentBlocker.ruleCount)개").foregroundStyle(.secondary).font(.subheadline)
                     }
                 } header: { Text("프라이버시 & 보안") } footer: { Text("광고, 트래커, 핑거프린팅을 차단합니다.") }
+
+                // ★ 위장 프로필 정보
+                Section {
+                    HStack {
+                        Label("위장 기기", systemImage: "iphone.gen3"); Spacer()
+                        Text(DeviceProfileManager.shared.activeProfile.name)
+                            .foregroundStyle(.secondary).font(.subheadline)
+                    }
+                    HStack {
+                        Label("방어 벡터", systemImage: "shield.lefthalf.filled"); Spacer()
+                        Text("11개").foregroundStyle(.secondary).font(.subheadline)
+                    }
+                    Button {
+                        DeviceProfileManager.shared.refreshProfile()
+                        NotificationCenter.default.post(name: .downloadCompleted, object: "새 위장 프로필로 전환됨: \(DeviceProfileManager.shared.activeProfile.name)")
+                    } label: {
+                        Label("프로필 갱신", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                } header: { Text("핑거프린트 위장") } footer: { Text("세션마다 대중적인 iPhone 모델로 위장하여 기기 식별을 차단합니다.") }
 
                 Section {
                     Toggle(isOn: $autoSaveToGallery) { Label("다운로드 후 자동 갤러리 저장", systemImage: "photo.badge.arrow.down") }
@@ -47,6 +68,14 @@ struct SettingsView: View {
                         Text("라이트 모드").tag("light")
                         Text("다크 모드").tag("dark")
                     } label: { Label("테마", systemImage: "circle.lefthalf.filled") }
+                    // ★ 주소바 위치
+                    Toggle(isOn: $addressBarBottom) {
+                        Label("주소바 하단 배치", systemImage: "rectangle.bottomhalf.inset.filled")
+                    }
+                    // ★ 쿠키 배너 자동 거부
+                    Toggle(isOn: $autoDismissCookies) {
+                        Label("쿠키 배너 자동 거부", systemImage: "xmark.shield")
+                    }
                 } header: { Text("검색 & 브라우저") }
 
                 Section {

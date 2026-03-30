@@ -21,13 +21,22 @@ struct BrowserContainerView: View {
     @State private var isAddressEditing = false
     @State private var toastMessage: String?
     @State private var toastIsError = false
+    // ★ Phase 1 신규 상태
+    @State private var showFindInPage = false
+    @State private var findText = ""
+    @State private var isDesktopMode = false
+    @State private var phishingRisk: PhishingRisk = .safe
+    @AppStorage("addressBarPosition") private var addressBarBottom = true
     @FocusState private var isURLFieldFocused: Bool
+    @FocusState private var isFindFieldFocused: Bool
 
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
                 if isElementHideMode { elementHideBanner }
                 if isAddressEditing { topSearchBar }
+                // ★ Find in Page 바
+                if showFindInPage { findInPageBar }
                 webArea.frame(maxWidth: .infinity, maxHeight: .infinity)
                 if !isAddressEditing { bottomToolbar }
             }
@@ -35,6 +44,8 @@ struct BrowserContainerView: View {
         .background(Color(.systemBackground))
         .onChange(of: tabManager.activeTab?.url) { _, url in
             if !isAddressEditing { addressText = url?.absoluteString ?? "" }
+            // ★ 피싱 URL 검사
+            if let url = url { phishingRisk = PhishingDetector.shared.assess(url) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openInNewTab)) { n in
             if let url = n.object as? URL { tabManager.newTab(url: url) }
@@ -91,6 +102,7 @@ struct BrowserContainerView: View {
         .sheet(isPresented: $showSettings) { SettingsView() }
         .sheet(isPresented: $showPrivacy) { PrivacyDashboardView() }
         .sheet(isPresented: $showTabGrid) { TabGridView() }
+        .overlay { phishingWarningOverlay }
     }
 
     private var elementHideBanner: some View {
@@ -188,10 +200,22 @@ struct BrowserContainerView: View {
                 }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: tabManager.activeTab?.isSecure == true ? "lock.fill" : "exclamationmark.triangle.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(tabManager.activeTab?.isSecure == true ? .green : .orange)
-                        .frame(width: 18)
+                    // ★ 피싱 위험도 표시
+                    Group {
+                        switch phishingRisk {
+                        case .phishing:
+                            Image(systemName: "exclamationmark.shield.fill")
+                                .foregroundStyle(.red)
+                        case .suspicious:
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                        case .safe:
+                            Image(systemName: tabManager.activeTab?.isSecure == true ? "lock.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(tabManager.activeTab?.isSecure == true ? .green : .orange)
+                        }
+                    }
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 18)
                     Text(tabManager.activeTab?.url?.host ?? "검색 또는 주소 입력")
                         .font(.system(size: 15)).foregroundStyle(.primary).lineLimit(1)
                     Spacer()
@@ -271,12 +295,48 @@ struct BrowserContainerView: View {
                     }
                     Section("도구") {
                         Button { webViewRef?.reload() } label: { Label("새로고침", systemImage: "arrow.clockwise") }
+                        // ★ 데스크톱 모드 토글
+                        Button {
+                            isDesktopMode.toggle()
+                            DeviceProfileManager.shared.setDesktopMode(isDesktopMode)
+                            webViewRef?.customUserAgent = DeviceProfileManager.shared.activeProfile.userAgent
+                            webViewRef?.reload()
+                        } label: {
+                            Label(isDesktopMode ? "모바일 모드" : "데스크톱 모드",
+                                  systemImage: isDesktopMode ? "iphone" : "desktopcomputer")
+                        }
+                        // ★ 페이지 내 검색
+                        Button {
+                            withAnimation { showFindInPage.toggle() }
+                            if !showFindInPage { clearFindHighlights() }
+                        } label: { Label("페이지 내 검색", systemImage: "doc.text.magnifyingglass") }
+                        // ★ PiP (Picture-in-Picture)
+                        Button {
+                            webViewRef?.evaluateJavaScript("""
+                            (function(){
+                                var v=document.querySelector('video');
+                                if(v){
+                                    if(v.webkitSupportsPresentationMode&&v.webkitSupportsPresentationMode('picture-in-picture')){
+                                        v.webkitSetPresentationMode('picture-in-picture');
+                                    }else if(document.pictureInPictureEnabled){
+                                        v.requestPictureInPicture();
+                                    }
+                                }
+                            })()
+                            """)
+                        } label: { Label("PiP (화면 속 화면)", systemImage: "pip") }
                         Button { isElementHideMode = true; webViewRef?.evaluateJavaScript("window._gsToggleHideMode()") } label: { Label("요소 가리기", systemImage: "eye.slash") }
                         Button { if let h = tabManager.activeTab?.url?.host { ElementHiderStore.shared.clearRules(for: h); webViewRef?.reload() } } label: { Label("숨긴 요소 복원", systemImage: "eye") }
                     }
                     Section {
                         Button { showPrivacy = true } label: { Label("프라이버시 리포트", systemImage: "shield.checkered") }
                         Button { showSettings = true } label: { Label("설정", systemImage: "gearshape") }
+                    }
+                    // ★ Fire Button (DuckDuckGo 스타일)
+                    Section {
+                        Button(role: .destructive) { fireButtonAction() } label: {
+                            Label("Fire! (데이터 삭제)", systemImage: "flame.fill")
+                        }
                     }
                     if let url = tabManager.activeTab?.url {
                         Section { ShareLink(item: url) { Label("페이지 공유", systemImage: "square.and.arrow.up") } }
@@ -307,11 +367,116 @@ struct BrowserContainerView: View {
         withAnimation(.easeInOut(duration: 0.25)) { isAddressEditing = false }
         isURLFieldFocused = false
     }
+
+    // MARK: - ★ Find in Page (Firefox/Chrome 스타일)
+    private var findInPageBar: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.system(size: 13))
+                TextField("페이지 내 검색", text: $findText)
+                    .textFieldStyle(.plain).font(.system(size: 15))
+                    .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    .focused($isFindFieldFocused)
+                    .onSubmit { findInPage(forward: true) }
+                    .onChange(of: findText) { _, text in
+                        if text.isEmpty { clearFindHighlights() }
+                    }
+                if !findText.isEmpty {
+                    Button { findText = ""; clearFindHighlights() } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary).font(.system(size: 14))
+                    }
+                }
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: 10))
+
+            HStack(spacing: 4) {
+                Button { findInPage(forward: false) } label: {
+                    Image(systemName: "chevron.up").font(.system(size: 14, weight: .semibold)).foregroundStyle(.teal)
+                        .frame(width: 32, height: 32).contentShape(Rectangle())
+                }
+                Button { findInPage(forward: true) } label: {
+                    Image(systemName: "chevron.down").font(.system(size: 14, weight: .semibold)).foregroundStyle(.teal)
+                        .frame(width: 32, height: 32).contentShape(Rectangle())
+                }
+            }
+
+            Button {
+                withAnimation { showFindInPage = false }
+                clearFindHighlights()
+            } label: {
+                Text("완료").font(.system(size: 14, weight: .medium)).foregroundStyle(.teal)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Color(.systemBackground))
+        .onAppear { isFindFieldFocused = true }
+    }
+
+    private func findInPage(forward: Bool) {
+        guard !findText.isEmpty else { return }
+        let escaped = findText.replacingOccurrences(of: "'", with: "\\'")
+        // window.find(string, caseSensitive, backwards, wrapAround)
+        webViewRef?.evaluateJavaScript("window.find('\(escaped)', false, \(!forward), true)")
+    }
+
+    private func clearFindHighlights() {
+        webViewRef?.evaluateJavaScript("window.getSelection().removeAllRanges()")
+    }
+
+    // MARK: - ★ Fire Button (DuckDuckGo 스타일 — 즉시 삭제)
+    private func fireButtonAction() {
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        WKWebsiteDataStore.default().removeData(ofTypes: types, modifiedSince: .distantPast) {
+            // 탭 초기화
+            tabManager.closeAllTabs()
+            tabManager.newTab()
+            // 프로필 갱신 (새 세션)
+            DeviceProfileManager.shared.refreshProfile()
+            // 피드백
+            toastIsError = false
+            toastMessage = "🔥 모든 브라우징 데이터가 삭제되었습니다"
+            Task { try? await Task.sleep(for: .seconds(3)); withAnimation { toastMessage = nil } }
+        }
+    }
+
+    // MARK: - ★ Phishing Warning Overlay
+    @ViewBuilder
+    private var phishingWarningOverlay: some View {
+        if phishingRisk == .phishing {
+            VStack(spacing: 16) {
+                Image(systemName: "exclamationmark.shield.fill")
+                    .font(.system(size: 44)).foregroundStyle(.red)
+                Text("위험한 사이트 경고").font(.title3.weight(.bold))
+                Text("이 사이트는 피싱 또는 악성 사이트로 의심됩니다.\n개인정보를 입력하지 마세요.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).padding(.horizontal)
+                HStack(spacing: 16) {
+                    Button {
+                        webViewRef?.goBack()
+                        phishingRisk = .safe
+                    } label: {
+                        Text("뒤로 가기").font(.headline).foregroundStyle(.white)
+                            .padding(.horizontal, 24).padding(.vertical, 12)
+                            .background(.red, in: Capsule())
+                    }
+                    Button {
+                        phishingRisk = .safe // 사용자가 무시
+                    } label: {
+                        Text("무시하고 진행").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(.ultraThinMaterial)
+        }
+    }
 }
 
 // MARK: - New Tab Page
 struct NewTabPage: View {
     let onNavigate: (String) -> Void
+    @Environment(PrivacyEngine.self) private var privacyEngine
     @State private var searchText = ""
     @FocusState private var isSearchFocused: Bool
 
@@ -348,6 +513,29 @@ struct NewTabPage: View {
                 .clipShape(RoundedRectangle(cornerRadius: 24))
                 .padding(.horizontal, 24)
 
+                // ★ Privacy Stats (Brave Shields 스타일)
+                HStack(spacing: 12) {
+                    statCard(
+                        icon: "shield.checkered",
+                        value: "\(privacyEngine.totalTrackersBlocked)",
+                        label: "트래커 차단",
+                        color: .green
+                    )
+                    statCard(
+                        icon: "eye.slash.fill",
+                        value: "\(privacyEngine.totalAdsBlocked)",
+                        label: "광고 차단",
+                        color: .teal
+                    )
+                    statCard(
+                        icon: "fingerprint",
+                        value: "\(privacyEngine.totalFingerprintDefenses)",
+                        label: "핑거프린트 방어",
+                        color: .purple
+                    )
+                }
+                .padding(.horizontal, 20)
+
                 // Quick links
                 VStack(alignment: .leading, spacing: 12) {
                     Text("자주 방문").font(.system(size: 13, weight: .semibold))
@@ -365,9 +553,33 @@ struct NewTabPage: View {
                 }
                 .padding(.horizontal, 20)
 
+                // ★ 현재 프로필 표시 (디버그/투명성)
+                VStack(spacing: 4) {
+                    let profile = DeviceProfileManager.shared.activeProfile
+                    Text("위장 프로필: \(profile.name)")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary.opacity(0.5))
+                    Text("11-vector 핑거프린트 방어 활성")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary.opacity(0.4))
+                }
+                .padding(.top, 8)
+
                 Spacer()
             }
         }.background(Color(.systemBackground))
+    }
+
+    private func statCard(icon: String, value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 20, weight: .medium)).foregroundStyle(color)
+            Text(value).font(.system(size: 18, weight: .bold, design: .rounded))
+            Text(label).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .background(color.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     private func ql(_ n: String, _ i: String, _ c: Color, _ u: String) -> some View {
