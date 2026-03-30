@@ -40,7 +40,7 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
         switch media.type {
         case .hls:
             startHLSDownload(dl)
-        case .mp4, .webm:
+        case .mp4, .webm, .image:
             startDirectDownload(dl)
         case .gif:
             startDirectDownload(dl)
@@ -89,10 +89,22 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
     // MARK: - Direct Download (MP4/GIF)
 
     private func startDirectDownload(_ dl: MediaDownload) {
+        // Skip blob: URLs — these can't be downloaded by URLSession
+        if dl.media.url.scheme == "blob" {
+            dl.state = .failed
+            dl.error = "blob: URL은 직접 다운로드 불가 (페이지에서 재생 후 녹화 필요)"
+            return
+        }
+
         var request = URLRequest(url: dl.media.url)
         request.setValue(dl.media.referer, forHTTPHeaderField: "Referer")
+        // Set Origin header for CORS
+        if let refURL = URL(string: dl.media.referer), let host = refURL.host {
+            request.setValue("\(refURL.scheme ?? "https")://\(host)", forHTTPHeaderField: "Origin")
+        }
         let ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
         request.setValue(ua, forHTTPHeaderField: "User-Agent")
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
         // Forward cookies from WKWebView session
         if let cookies = cookieStorage.cookies(for: dl.media.url), !cookies.isEmpty {
             let cookieHeader = cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
@@ -368,10 +380,76 @@ extension MediaDownloadManager: URLSessionDownloadDelegate {
                     didFinishDownloadingTo location: URL) {
         guard let dl = find(byTaskID: downloadTask.taskIdentifier) else { return }
 
-        let ext = dl.media.type == .gif ? "gif" : "mp4"
-        let fileName = "\(dl.media.title.prefix(50))_\(Int(Date().timeIntervalSince1970)).\(ext)"
+        // ★ Validate HTTP response
+        if let httpResponse = downloadTask.response as? HTTPURLResponse {
+            let statusCode = httpResponse.statusCode
+            if statusCode < 200 || statusCode >= 400 {
+                dl.state = .failed
+                dl.error = "서버 응답 오류: HTTP \(statusCode)"
+                return
+            }
+
+            // Check content-type — reject HTML responses
+            let contentType = httpResponse.mimeType?.lowercased() ?? ""
+            if contentType.contains("text/html") || contentType.contains("application/json") {
+                dl.state = .failed
+                dl.error = "다운로드 실패: 서버가 영상 대신 웹페이지를 반환했습니다 (인증 또는 접근 제한)"
+                return
+            }
+        }
+
+        // ★ Validate file size (< 1KB is likely an error)
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: location.path)[.size] as? Int) ?? 0
+        if fileSize < 1024 {
+            dl.state = .failed
+            dl.error = "다운로드 실패: 파일 크기가 너무 작습니다 (\(fileSize)B) — URL이 만료되었거나 접근이 차단되었을 수 있습니다"
+            return
+        }
+
+        // ★ Determine proper file extension from Content-Type + URL
+        let ext: String
+        if dl.media.type == .gif {
+            ext = "gif"
+        } else if let mime = (downloadTask.response as? HTTPURLResponse)?.mimeType?.lowercased() {
+            switch mime {
+            case let m where m.contains("mp4"): ext = "mp4"
+            case let m where m.contains("webm"): ext = "webm"
+            case let m where m.contains("quicktime") || m.contains("mov"): ext = "mov"
+            case let m where m.contains("mpeg"): ext = "mp4"
+            case let m where m.contains("gif"): ext = "gif"
+            case let m where m.contains("png"): ext = "png"
+            case let m where m.contains("jpeg") || m.contains("jpg"): ext = "jpg"
+            case let m where m.contains("webp"): ext = "webp"
+            case let m where m.contains("octet-stream"):
+                // Use URL extension as fallback
+                let urlExt = dl.media.url.pathExtension.lowercased()
+                ext = ["mp4","webm","mov","gif","png","jpg","jpeg","webp","m4v"].contains(urlExt) ? urlExt : "mp4"
+            default:
+                let urlExt = dl.media.url.pathExtension.lowercased()
+                ext = urlExt.isEmpty ? "mp4" : urlExt
+            }
+        } else {
+            let urlExt = dl.media.url.pathExtension.lowercased()
+            ext = urlExt.isEmpty ? "mp4" : urlExt
+        }
+
+        // ★ Use Content-Disposition filename if available, otherwise generate
+        var fileName: String
+        if let httpResponse = downloadTask.response as? HTTPURLResponse,
+           let disposition = httpResponse.value(forHTTPHeaderField: "Content-Disposition"),
+           let nameRange = disposition.range(of: "filename=") {
+            var name = String(disposition[nameRange.upperBound...])
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+            if let semiRange = name.range(of: ";") { name = String(name[..<semiRange.lowerBound]) }
+            fileName = name
+        } else {
+            fileName = "\(dl.media.title.prefix(50))_\(Int(Date().timeIntervalSince1970)).\(ext)"
+        }
+        fileName = fileName
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+
         let dest = Self.downloadDirectory.appendingPathComponent(fileName)
 
         do {
@@ -384,11 +462,11 @@ extension MediaDownloadManager: URLSessionDownloadDelegate {
             dl.progress = 1.0
             downloads.removeAll { $0.id == dl.id }
             completedDownloads.insert(dl, at: 0)
-            NotificationCenter.default.post(name: .downloadCompleted, object: dl.media.title)
+            NotificationCenter.default.post(name: .downloadCompleted, object: "\(dl.media.title) 다운로드 완료 (\(ByteCountFormatter.string(fromByteCount: Int64(fileSize), countStyle: .file)))")
             if dl.saveToVault { Task { await moveToVault(dl) } }
         } catch {
             dl.state = .failed
-            dl.error = error.localizedDescription
+            dl.error = "파일 저장 실패: \(error.localizedDescription)"
         }
     }
 
@@ -405,7 +483,14 @@ extension MediaDownloadManager: URLSessionDownloadDelegate {
         guard let error = error, let dl = find(byTaskID: task.taskIdentifier) else { return }
         if (error as NSError).code != NSURLErrorCancelled {
             dl.state = .failed
-            dl.error = error.localizedDescription
+            let nsError = error as NSError
+            switch nsError.code {
+            case NSURLErrorTimedOut: dl.error = "다운로드 시간 초과 — 네트워크 상태를 확인하세요"
+            case NSURLErrorNotConnectedToInternet: dl.error = "인터넷 연결 없음"
+            case NSURLErrorNetworkConnectionLost: dl.error = "네트워크 연결 끊김 — 재시도하세요"
+            case NSURLErrorSecureConnectionFailed: dl.error = "보안 연결 실패 (SSL)"
+            default: dl.error = "다운로드 오류: \(error.localizedDescription)"
+            }
         }
     }
 }

@@ -231,8 +231,20 @@ struct DownloadsManagerView: View {
 
     private func openFile(_ url: URL, type: DetectedMedia.MediaType) {
         let ext = url.pathExtension.lowercased()
-        let isPlayable = type == .mp4 || type == .hls || type == .blob
-            || ["mp4","m4v","mov","webm","movpkg"].contains(ext)
+        let isPlayable = type == .mp4 || type == .hls || type == .blob || type == .webm
+            || ["mp4","m4v","mov","webm","movpkg","ts"].contains(ext)
+        let isImage = type == .image || type == .gif
+            || ["png","jpg","jpeg","webp","heic","gif"].contains(ext)
+
+        if isImage {
+            // Share image instead of trying to play it
+            if let s = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let r = s.windows.first?.rootViewController {
+                r.present(UIActivityViewController(activityItems: [url], applicationActivities: nil), animated: true)
+            }
+            return
+        }
+
         if isPlayable {
             // movpkg: use AVPlayer directly (iOS can play .movpkg natively)
             // mp4/mov: direct play
@@ -362,6 +374,7 @@ struct DownloadsManagerView: View {
         let ext = url.pathExtension.lowercased()
         if ["mp4","m4v","mov","webm"].contains(ext) { return .mp4 }
         if ext == "gif" { return .gif }
+        if ["png","jpg","jpeg","webp","heic"].contains(ext) { return .image }
         return .mp4
     }
 

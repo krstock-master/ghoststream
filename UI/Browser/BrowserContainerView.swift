@@ -18,6 +18,8 @@ struct BrowserContainerView: View {
     @State private var webViewRef: WKWebView?
     @State private var isElementHideMode = false
     @State private var isAddressEditing = false
+    @State private var toastMessage: String?
+    @State private var toastIsError = false
     @FocusState private var isURLFieldFocused: Bool
 
     var body: some View {
@@ -55,6 +57,37 @@ struct BrowserContainerView: View {
                 latestMedia = media
                 withAnimation { showMediaSnackbar = true }
                 Task { try? await Task.sleep(for: .seconds(3)); withAnimation { showMediaSnackbar = false } }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .downloadCompleted)) { n in
+            if let msg = n.object as? String {
+                toastIsError = false
+                toastMessage = msg
+                Task { try? await Task.sleep(for: .seconds(3)); withAnimation { toastMessage = nil } }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .downloadFailed)) { n in
+            if let msg = n.object as? String {
+                toastIsError = true
+                toastMessage = "❌ \(msg)"
+                Task { try? await Task.sleep(for: .seconds(4)); withAnimation { toastMessage = nil } }
+            }
+        }
+        .overlay(alignment: .top) {
+            if let toast = toastMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: toastIsError ? "xmark.circle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(toastIsError ? .red : .green)
+                    Text(toast).font(.subheadline).lineLimit(2)
+                    Spacer()
+                }
+                .padding(14)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
+                .padding(.top, 50)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.spring(response: 0.35), value: toastMessage)
             }
         }
         .sheet(isPresented: $showDownloads) { DownloadsManagerView() }

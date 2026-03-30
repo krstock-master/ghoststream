@@ -171,7 +171,17 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             var hasHLS = false
             for s in sources {
                 guard let u = (s["url"] as? String).flatMap({ URL(string: $0) }) else { continue }
-                let t: DetectedMedia.MediaType = (s["type"] as? String) == "hls" ? .hls : (s["type"] as? String) == "gif" ? .gif : .mp4
+                // Skip data: URLs and empty URLs
+                if u.scheme == "data" || u.absoluteString.isEmpty { continue }
+                let typeStr = (s["type"] as? String) ?? ""
+                let t: DetectedMedia.MediaType
+                switch typeStr {
+                case "hls": t = .hls
+                case "gif": t = .gif
+                case "image": t = .image
+                case "webm": t = .webm
+                default: t = .mp4
+                }
                 let media = DetectedMedia(url: u, type: t, quality: (s["label"] as? String) ?? "default",
                     title: title, referer: ref, thumbnail: thumb, estimatedSize: nil)
                 if !tab.detectedMedia.contains(media) { tab.detectedMedia.append(media); onMediaDetected(media) }
@@ -183,6 +193,11 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             guard let urlStr = dict["url"] as? String, let url = URL(string: urlStr) else { return }
             // Hide overlay signal from webkitendfullscreen
             if urlStr == "__hide_overlay__" { FullscreenDownloadOverlay.shared.hide(); return }
+            // Reject blob: and data: URLs
+            if url.scheme == "blob" || url.scheme == "data" {
+                NotificationCenter.default.post(name: .downloadFailed, object: "이 영상은 스트리밍 전용으로 직접 다운로드할 수 없습니다 (blob/MediaSource)")
+                return
+            }
             let type: DetectedMedia.MediaType = urlStr.contains(".m3u8") ? .hls : .mp4
             let title = (dict["title"] as? String) ?? url.deletingPathExtension().lastPathComponent
             let quality = (dict["quality"] as? String) ?? "Auto"
@@ -303,22 +318,34 @@ enum WebViewConfigurator {
         b.onclick=function(e){e.stopPropagation();e.preventDefault();
             var src=v.currentSrc||v.src||'';
             v.querySelectorAll('source').forEach(function(s){if(!src&&s.src)src=s.src;});
-            if(src){window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p'});
-            b.innerHTML='<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-            setTimeout(function(){b.innerHTML='<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 19h14" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';},2000);}};
-        b.ontouchend=function(e){e.stopPropagation();};
+            // Skip blob: URLs — they can't be downloaded directly
+            if(src&&src.startsWith('blob:')){
+                // Try to find a non-blob source from our intercepted URLs
+                src='';
+            }
+            if(src&&!src.startsWith('blob:')&&!src.startsWith('data:')){
+                window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p'});
+                b.innerHTML='<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+                setTimeout(function(){b.innerHTML='<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 19h14" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';},2000);
+            } else {
+                // Show red X - can't download blob/data URLs
+                b.innerHTML='<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="white" stroke-width="3" stroke-linecap="round"/></svg>';
+                b.style.background='rgba(220,50,50,0.92)';
+                setTimeout(function(){b.innerHTML='<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 19h14" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';b.style.background='rgba(0,180,140,0.92)';},2000);
+            }};        b.ontouchend=function(e){e.stopPropagation();};
         w.appendChild(b);
         v.addEventListener('webkitbeginfullscreen',function(){var src=v.currentSrc||v.src;if(src)window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p',fullscreen:true});});
         v.addEventListener('webkitendfullscreen',function(){window.webkit.messageHandlers.alohaDownload.postMessage({url:'__hide_overlay__',title:'',quality:'',fullscreen:false});});
         v.addEventListener('webkitpresentationmodechanged',function(e){if(v.webkitPresentationMode==='fullscreen'){var src=v.currentSrc||v.src;if(src)window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p',fullscreen:true});}});
-        v.addEventListener('play',function(){if(!v.dataset.gsPlayed){v.dataset.gsPlayed='1';var src=v.currentSrc||v.src;if(src){window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:src,type:src.includes('.m3u8')?'hls':'mp4',label:(v.videoHeight||'Auto')+'p'}],title:document.title,referer:location.href,thumb:v.poster||null});}}});
+        v.addEventListener('play',function(){if(!v.dataset.gsPlayed){v.dataset.gsPlayed='1';var src=v.currentSrc||v.src;if(src&&!src.startsWith('blob:')&&!src.startsWith('data:')){window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:src,type:src.includes('.m3u8')?'hls':'mp4',label:(v.videoHeight||'Auto')+'p'}],title:document.title,referer:location.href,thumb:v.poster||null});}}});
     }
 
     function scan(){
         document.querySelectorAll('video').forEach(addDL);
         document.querySelectorAll('video').forEach(function(v){
-            var s=[];if(v.src)s.push({url:v.src,type:v.src.includes('.m3u8')?'hls':'mp4',label:'default'});
-            v.querySelectorAll('source').forEach(function(src){if(src.src)s.push({url:src.src,type:src.src.includes('.m3u8')?'hls':'mp4',label:src.getAttribute('label')||'default'});});
+            var s=[];
+            if(v.src&&!v.src.startsWith('blob:')&&!v.src.startsWith('data:'))s.push({url:v.src,type:v.src.includes('.m3u8')?'hls':'mp4',label:'default'});
+            v.querySelectorAll('source').forEach(function(src){if(src.src&&!src.src.startsWith('blob:'))s.push({url:src.src,type:src.src.includes('.m3u8')?'hls':'mp4',label:src.getAttribute('label')||'default'});});
             if(s.length)window.webkit.messageHandlers.mediaFound.postMessage({sources:s,title:document.title,referer:location.href,thumb:v.poster||null});
         });
         document.querySelectorAll('img').forEach(function(img){if(!img.src||img.src.startsWith('data:'))return;
@@ -330,8 +357,16 @@ enum WebViewConfigurator {
             if(ss.length)window.webkit.messageHandlers.mediaFound.postMessage({sources:ss,title:it.title||document.title,referer:location.href,thumb:it.image||null});}
             p.on('ready',ex);p.on('playlistItem',ex);if(p.getState()!=='idle')ex();}catch(e){}});}
     }
-    var _xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){if(typeof u==='string'&&u.includes('.m3u8'))window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:u,type:'hls',label:'HLS'}],title:document.title,referer:location.href,thumb:null});return _xo.apply(this,arguments);};
-    var _f=window.fetch;window.fetch=function(i){var u=typeof i==='string'?i:(i&&i.url?i.url:'');if(u.includes('.m3u8'))window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:u,type:'hls',label:'HLS'}],title:document.title,referer:location.href,thumb:null});return _f.apply(this,arguments);};
+    var _xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){if(typeof u==='string'){
+        if(u.includes('.m3u8'))window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:u,type:'hls',label:'HLS'}],title:document.title,referer:location.href,thumb:null});
+        else if(u.match(/\\.(mp4|webm|m4v|mov)(\\?|$)/i)&&!u.startsWith('blob:'))window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:u,type:'mp4',label:'Direct'}],title:document.title,referer:location.href,thumb:null});
+        else if(u.includes('googlevideo.com/videoplayback'))window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:u,type:'mp4',label:'YouTube'}],title:document.title,referer:location.href,thumb:null});
+    }return _xo.apply(this,arguments);};
+    var _f=window.fetch;window.fetch=function(i){var u=typeof i==='string'?i:(i&&i.url?i.url:'');
+        if(u.includes('.m3u8'))window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:u,type:'hls',label:'HLS'}],title:document.title,referer:location.href,thumb:null});
+        else if(u.match(/\\.(mp4|webm|m4v|mov)(\\?|$)/i)&&!u.startsWith('blob:'))window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:u,type:'mp4',label:'Direct'}],title:document.title,referer:location.href,thumb:null});
+        else if(u.includes('googlevideo.com/videoplayback'))window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:u,type:'mp4',label:'YouTube'}],title:document.title,referer:location.href,thumb:null});
+    return _f.apply(this,arguments);};
     var _co=URL.createObjectURL.bind(URL);URL.createObjectURL=function(b){var u=_co(b);if(b&&b.type&&b.type.startsWith('video/')){var r=new FileReader();r.onload=function(e){window.webkit.messageHandlers.blobCapture.postMessage({data:e.target.result,mimeType:b.type});};r.readAsDataURL(b);}return u;};
 
     // ===== ELEMENT HIDER =====
@@ -400,12 +435,12 @@ enum WebViewConfigurator {
     setInterval(function(){
         document.querySelectorAll('video').forEach(function(v){
             if(!v.dataset.gsBtn)addDL(v);
-            // If video is playing and has src, emit for snackbar
+            // If video is playing and has downloadable src, emit for snackbar
             if(!v.paused&&!v.dataset.gsEmitted){
                 v.dataset.gsEmitted='1';
                 var src=v.currentSrc||v.src||'';
                 v.querySelectorAll('source').forEach(function(s){if(!src&&s.src)src=s.src;});
-                if(src)window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:src,type:src.includes('.m3u8')?'hls':'mp4',label:(v.videoHeight||'Auto')+'p'}],title:document.title,referer:location.href,thumb:v.poster||null});
+                if(src&&!src.startsWith('blob:')&&!src.startsWith('data:'))window.webkit.messageHandlers.mediaFound.postMessage({sources:[{url:src,type:src.includes('.m3u8')?'hls':'mp4',label:(v.videoHeight||'Auto')+'p'}],title:document.title,referer:location.href,thumb:v.poster||null});
             }
         });
     },3000);

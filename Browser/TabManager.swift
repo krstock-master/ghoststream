@@ -184,6 +184,7 @@ struct DetectedMedia: Identifiable, Hashable {
         case gif = "GIF"
         case blob = "Blob"
         case webm = "WebM"
+        case image = "Image"
     }
 
     func hash(into hasher: inout Hasher) {
