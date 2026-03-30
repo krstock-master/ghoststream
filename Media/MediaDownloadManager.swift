@@ -595,6 +595,7 @@ final class MediaDownload: Identifiable, @unchecked Sendable {
     }
 
     var hlsConversionStatus: String?
+    var savedAssetID: String? // ★ 갤러리 저장 시 PHAsset localIdentifier (정확한 삭제용)
 
     var formattedProgress: String {
         if state == .converting { return "변환 중..." }

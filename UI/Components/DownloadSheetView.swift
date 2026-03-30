@@ -16,6 +16,7 @@ struct DownloadsManagerView: View {
 
     @State private var showURLInput = false
     @State private var pasteURL = ""
+    @State private var fileListRefresh = UUID() // ★ 파일 목록 갱신 트리거
 
     var body: some View {
         NavigationStack {
@@ -170,6 +171,10 @@ struct DownloadsManagerView: View {
                                     try? FileManager.default.removeItem(at: url)
                                     // ★ 갤러리(PHAsset)에서도 삭제 (권한 요청 포함, 자체 토스트 발송)
                                     await Self.deleteFromPhotoLibrary(filename: url.lastPathComponent)
+                                    await MainActor.run {
+                                        dm.completedDownloads.removeAll { $0.id == dl.id }
+                                        NotificationCenter.default.post(name: .downloadCompleted, object: "🔒 보안 폴더에 저장 완료")
+                                    }
                                 } catch {
                                     await MainActor.run {
                                         NotificationCenter.default.post(name: .downloadFailed, object: "보안 폴더 저장 실패: \(error.localizedDescription)")
@@ -186,6 +191,18 @@ struct DownloadsManagerView: View {
                         }
 
                         Spacer()
+
+                        // ★ 삭제 버튼
+                        Button(role: .destructive) {
+                            if let url = dl.localURL {
+                                try? FileManager.default.removeItem(at: url)
+                            }
+                            dm.completedDownloads.removeAll { $0.id == dl.id }
+                        } label: {
+                            Image(systemName: "trash").font(.caption).foregroundStyle(.red)
+                                .padding(.horizontal, 8).padding(.vertical, 6)
+                                .background(Color(.tertiarySystemFill)).clipShape(Capsule())
+                        }
                     }
                 }
             }
@@ -201,6 +218,7 @@ struct DownloadsManagerView: View {
     @ViewBuilder
     private var filesTab: some View {
         let files = getDownloadedFiles()
+        let _ = fileListRefresh // ★ 삭제 후 갱신 트리거
         if files.isEmpty {
             emptyState("저장된 파일 없음", icon: "folder", desc: "다운로드된 파일이 여기에 저장됩니다")
         } else {
@@ -228,6 +246,10 @@ struct DownloadsManagerView: View {
                                 try await vault.store(fileURL: url, originalName: url.lastPathComponent)
                                 try? FileManager.default.removeItem(at: url)
                                 await Self.deleteFromPhotoLibrary(filename: url.lastPathComponent)
+                                await MainActor.run {
+                                    fileListRefresh = UUID()
+                                    NotificationCenter.default.post(name: .downloadCompleted, object: "🔒 보안 폴더에 이동 완료")
+                                }
                             } catch {
                                 await MainActor.run {
                                     NotificationCenter.default.post(name: .downloadFailed, object: "보안 폴더 저장 실패")
@@ -236,7 +258,10 @@ struct DownloadsManagerView: View {
                         }
                     } label: { Label("보안 폴더로 이동", systemImage: "lock.shield") }
                     ShareLink(item: url) { Label("공유", systemImage: "square.and.arrow.up") }
-                    Button(role: .destructive) { try? FileManager.default.removeItem(at: url) } label: { Label("삭제", systemImage: "trash") }
+                    Button(role: .destructive) {
+                        try? FileManager.default.removeItem(at: url)
+                        fileListRefresh = UUID() // ★ 목록 갱신
+                    } label: { Label("삭제", systemImage: "trash") }
                 }
             }
         }
@@ -525,9 +550,7 @@ struct DownloadsManagerView: View {
     }
 
     // ★ 보안폴더 이동 시 갤러리에서 해당 파일 삭제
-    // ★ FIX: 파일명 매칭 → 날짜+미디어타입 매칭 (iOS가 갤러리 저장 시 파일명 변경하므로)
     static func deleteFromPhotoLibrary(filename: String) async {
-        // readWrite 권한 필요 (addOnly로는 삭제 불가)
         let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         guard status == .authorized || status == .limited else {
             await MainActor.run {
@@ -537,69 +560,54 @@ struct DownloadsManagerView: View {
             return
         }
 
-        let ext = (filename as NSString).pathExtension.lowercased()
-        let isVideo = ["mp4", "m4v", "mov", "webm"].contains(ext)
-
-        // 최근 10분 내 추가된 에셋 중 미디어 타입 일치하는 것 검색
-        let fetchOptions = PHFetchOptions()
-        let tenMinutesAgo = Date().addingTimeInterval(-600)
-        fetchOptions.predicate = NSPredicate(format: "creationDate > %@", tenMinutesAgo as NSDate)
-        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        fetchOptions.fetchLimit = 10
-
-        let mediaType: PHAssetMediaType = isVideo ? .video : .image
-        let assets = PHAsset.fetchAssets(with: mediaType, options: fetchOptions)
-
-        // 추가로 파일명 매칭 시도 (성공하면 정확한 에셋 삭제)
         var toDelete: [PHAsset] = []
-        let normalizedName = filename.lowercased()
-            .replacingOccurrences(of: " ", with: "_")
-            .replacingOccurrences(of: ":", with: "_")
-        let nameWithoutExt = (filename as NSString).deletingPathExtension.lowercased()
 
-        assets.enumerateObjects { asset, _, _ in
-            let resources = PHAssetResource.assetResources(for: asset)
-            var matched = false
-            for r in resources {
-                let origName = r.originalFilename.lowercased()
-                    .replacingOccurrences(of: " ", with: "_")
-                    .replacingOccurrences(of: ":", with: "_")
-                if origName == normalizedName || origName.contains(nameWithoutExt) {
-                    matched = true
-                    break
-                }
+        // ★ 1차: 추적된 PHAsset ID로 정확 삭제 (가장 신뢰)
+        if let trackedID = GalleryAssetTracker.shared.assetID(for: filename) {
+            let result = PHAsset.fetchAssets(withLocalIdentifiers: [trackedID], options: nil)
+            if let asset = result.firstObject {
+                toDelete.append(asset)
             }
-            if matched { toDelete.append(asset) }
+            GalleryAssetTracker.shared.remove(filename: filename)
         }
 
-        // 파일명 매칭 실패 → 가장 최근 에셋 사용 (방금 다운로드한 것)
-        if toDelete.isEmpty && assets.count > 0 {
-            if let latest = assets.firstObject {
+        // ★ 2차: ID 추적 실패 시 최근 에셋에서 파일 크기 매칭
+        if toDelete.isEmpty {
+            let ext = (filename as NSString).pathExtension.lowercased()
+            let isVideo = ["mp4", "m4v", "mov", "webm"].contains(ext)
+            let fetchOptions = PHFetchOptions()
+            fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+            fetchOptions.fetchLimit = 5
+            let tenMinutesAgo = Date().addingTimeInterval(-600)
+            fetchOptions.predicate = NSPredicate(format: "creationDate > %@", tenMinutesAgo as NSDate)
+
+            let assets = PHAsset.fetchAssets(with: isVideo ? .video : .image, options: fetchOptions)
+            // 파일명 매칭 시도
+            let normalizedName = filename.lowercased().replacingOccurrences(of: " ", with: "_")
+            assets.enumerateObjects { asset, _, _ in
+                let resources = PHAssetResource.assetResources(for: asset)
+                for r in resources {
+                    let orig = r.originalFilename.lowercased().replacingOccurrences(of: " ", with: "_")
+                    if orig == normalizedName || orig.contains((filename as NSString).deletingPathExtension.lowercased()) {
+                        toDelete.append(asset)
+                        return
+                    }
+                }
+            }
+            // 최종 폴백: 가장 최근 에셋
+            if toDelete.isEmpty, let latest = assets.firstObject {
                 toDelete.append(latest)
             }
         }
 
-        guard !toDelete.isEmpty else {
-            await MainActor.run {
-                NotificationCenter.default.post(name: .downloadCompleted,
-                    object: "🔒 보안 폴더 저장 완료 (갤러리에서 일치 파일 미발견)")
-            }
-            return
-        }
+        guard !toDelete.isEmpty else { return }
 
         do {
             try await PHPhotoLibrary.shared().performChanges {
                 PHAssetChangeRequest.deleteAssets(toDelete as NSFastEnumeration)
             }
-            await MainActor.run {
-                NotificationCenter.default.post(name: .downloadCompleted,
-                    object: "🔒 보안 폴더 저장 + 갤러리에서 \(toDelete.count)개 삭제 완료")
-            }
         } catch {
-            await MainActor.run {
-                NotificationCenter.default.post(name: .downloadFailed,
-                    object: "갤러리 삭제 실패: \(error.localizedDescription)")
-            }
+            // iOS가 삭제 확인 팝업에서 사용자가 거부한 경우 — 무시
         }
     }
 
