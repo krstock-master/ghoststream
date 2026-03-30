@@ -536,6 +536,7 @@ struct BrowserContainerView: View {
 struct NewTabPage: View {
     let onNavigate: (String) -> Void
     @Environment(PrivacyEngine.self) private var privacyEngine
+    @Environment(BookmarkManager.self) private var bookmarkManager
     @State private var searchText = ""
     @FocusState private var isSearchFocused: Bool
 
@@ -595,19 +596,39 @@ struct NewTabPage: View {
                 }
                 .padding(.horizontal, 20)
 
-                // Quick links
+                // ★ F3: 북마크 (있으면 표시, 없으면 기본 사이트)
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("자주 방문").font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.secondary).padding(.leading, 4)
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 18) {
-                        ql("Google", "magnifyingglass", .blue, "https://google.com")
-                        ql("YouTube", "play.rectangle.fill", .red, "https://youtube.com")
-                        ql("네이버", "n.circle.fill", .green, "https://naver.com")
-                        ql("Twitter", "at", .cyan, "https://x.com")
-                        ql("디시인사이드", "bubble.left.fill", .orange, "https://dcinside.com")
-                        ql("인스타", "camera.fill", .purple, "https://instagram.com")
-                        ql("Reddit", "r.circle.fill", .orange, "https://reddit.com")
-                        ql("GitHub", "chevron.left.forwardslash.chevron.right", .gray, "https://github.com")
+                    if !bookmarkManager.bookmarks.isEmpty {
+                        Text("북마크").font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary).padding(.leading, 4)
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 18) {
+                            ForEach(bookmarkManager.bookmarks.prefix(8)) { bm in
+                                Button { onNavigate(bm.url.absoluteString) } label: {
+                                    VStack(spacing: 8) {
+                                        ZStack {
+                                            RoundedRectangle(cornerRadius: 14)
+                                                .fill(Color.teal.opacity(0.1))
+                                                .frame(width: 52, height: 52)
+                                            Text(String((bm.url.host ?? "?").prefix(1)).uppercased())
+                                                .font(.system(size: 22, weight: .bold, design: .rounded))
+                                                .foregroundStyle(.teal)
+                                        }
+                                        Text(bm.title.isEmpty ? (bm.url.host ?? "") : bm.title)
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Text("자주 방문").font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary).padding(.leading, 4)
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 18) {
+                            ql("Google", "magnifyingglass", .blue, "https://google.com")
+                            ql("YouTube", "play.rectangle.fill", .red, "https://youtube.com")
+                            ql("네이버", "n.circle.fill", .green, "https://naver.com")
+                            ql("Twitter", "at", .cyan, "https://x.com")
+                        }
                     }
                 }
                 .padding(.horizontal, 20)
