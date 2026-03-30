@@ -334,3 +334,46 @@ struct DownloadsManagerView: View {
         return "doc"
     }
 }
+// MARK: - VideoPlayerSheet
+struct VideoPlayerSheet: View {
+    let url: URL
+    @Binding var isPresented: Bool
+    @State private var player: AVPlayer?
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
+            if let player {
+                VideoPlayer(player: player).ignoresSafeArea()
+            }
+            HStack {
+                Button {
+                    player?.pause()
+                    isPresented = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 30))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.5), radius: 4)
+                }
+                .padding(.leading, 16)
+                .padding(.top, 52)
+                Spacer()
+            }
+        }
+        .onAppear {
+            player = AVPlayer(url: url)
+            player?.play()
+        }
+        .onDisappear { player?.pause() }
+        .gesture(
+            DragGesture(minimumDistance: 60, coordinateSpace: .local)
+                .onEnded { v in
+                    if v.translation.height > 60 {
+                        player?.pause()
+                        isPresented = false
+                    }
+                }
+        )
+    }
+}
