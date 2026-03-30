@@ -17,6 +17,8 @@ struct GhostStreamApp: App {
                 .environment(container.vaultManager)
                 .environment(container.dnsManager)
                 .environment(container.contentBlocker)
+                .environment(container.bookmarkManager)
+                .environment(container.settingsStore)
                 .preferredColorScheme(colorScheme)
                 .onAppear {
                     if JailbreakDetector.isJailbroken { showJailbreakAlert = true }

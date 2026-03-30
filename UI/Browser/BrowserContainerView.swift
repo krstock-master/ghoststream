@@ -26,7 +26,12 @@ struct BrowserContainerView: View {
     @State private var findText = ""
     @State private var isDesktopMode = false
     @State private var phishingRisk: PhishingRisk = .safe
+    @State private var showBookmarks = false
+    @State private var showReaderMode = false
+    @State private var readerTitle = ""
+    @State private var readerContent = ""
     @AppStorage("addressBarPosition") private var addressBarBottom = true
+    @State private var isToolbarCompact = false
     @FocusState private var isURLFieldFocused: Bool
     @FocusState private var isFindFieldFocused: Bool
 
@@ -49,6 +54,11 @@ struct BrowserContainerView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openInNewTab)) { n in
             if let url = n.object as? URL { tabManager.newTab(url: url) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toolbarScrollDirection)) { n in
+            if let compact = n.object as? Bool {
+                withAnimation(.easeInOut(duration: 0.2)) { isToolbarCompact = compact }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .startImmediateDownload)) { n in
             if let media = n.object as? DetectedMedia {
@@ -102,6 +112,15 @@ struct BrowserContainerView: View {
         .sheet(isPresented: $showSettings) { SettingsView() }
         .sheet(isPresented: $showPrivacy) { PrivacyDashboardView() }
         .sheet(isPresented: $showTabGrid) { TabGridView() }
+        .sheet(isPresented: $showBookmarks) {
+            BookmarkHistoryView { url in
+                tabManager.activeTab?.url = url
+                webViewRef?.load(URLRequest(url: url))
+            }
+        }
+        .sheet(isPresented: $showReaderMode) {
+            ReaderModeView(title: readerTitle, content: readerContent, url: tabManager.activeTab?.url)
+        }
         .overlay { phishingWarningOverlay }
     }
 
@@ -151,6 +170,7 @@ struct BrowserContainerView: View {
                 NewTabPage { navigateTo($0) }
             } else {
                 BrowserWebView(tab: tab, privacyEngine: privacyEngine, downloadManager: downloadManager,
+                    bookmarkManager: container.bookmarkManager,
                     onMediaDetected: { media in
                         latestMedia = media
                         withAnimation { showMediaSnackbar = true }
@@ -192,8 +212,9 @@ struct BrowserContainerView: View {
                         .animation(.easeInOut(duration: 0.2), value: tabManager.activeTab?.loadProgress)
                 }.frame(height: 2.5)
             }
-            // Address bar pill
-            Button {
+            // Address bar pill (★ 스크롤 시 축소)
+            if !isToolbarCompact {
+                Button {
                 withAnimation(.easeInOut(duration: 0.25)) {
                     isAddressEditing = true
                     addressText = tabManager.activeTab?.url?.absoluteString ?? ""
@@ -243,6 +264,7 @@ struct BrowserContainerView: View {
                 .background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: 26))
             }
             .padding(.horizontal, 14).padding(.top, 8)
+            } // end isToolbarCompact
             // 5-button bar: ← → ⬇️ □ ⋯
             HStack(spacing: 0) {
                 // ★ Fix 6: 뒤로가기 — disabled 대신 opacity로 처리 (터치 영역 유지)
@@ -310,6 +332,22 @@ struct BrowserContainerView: View {
                             withAnimation { showFindInPage.toggle() }
                             if !showFindInPage { clearFindHighlights() }
                         } label: { Label("페이지 내 검색", systemImage: "doc.text.magnifyingglass") }
+                        // ★ Reader Mode
+                        Button {
+                            webViewRef?.evaluateJavaScript(ReaderModeExtractor.extractionJS) { result, _ in
+                                guard let jsonStr = result as? String,
+                                      let data = jsonStr.data(using: .utf8),
+                                      let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
+                                readerTitle = dict["title"] ?? ""
+                                readerContent = dict["content"] ?? ""
+                                if readerContent.count > 100 {
+                                    showReaderMode = true
+                                } else {
+                                    toastIsError = true; toastMessage = "이 페이지에서는 리더 모드를 사용할 수 없습니다"
+                                    Task { try? await Task.sleep(for: .seconds(3)); withAnimation { toastMessage = nil } }
+                                }
+                            }
+                        } label: { Label("리더 모드", systemImage: "doc.plaintext") }
                         // ★ PiP (Picture-in-Picture)
                         Button {
                             webViewRef?.evaluateJavaScript("""
@@ -330,6 +368,18 @@ struct BrowserContainerView: View {
                     }
                     Section {
                         Button { showPrivacy = true } label: { Label("프라이버시 리포트", systemImage: "shield.checkered") }
+                        Button { showBookmarks = true } label: { Label("북마크 & 기록", systemImage: "bookmark") }
+                        // ★ 현재 페이지 북마크 토글
+                        if let tab = tabManager.activeTab, let url = tab.url {
+                            Button {
+                                container.bookmarkManager.toggleBookmark(title: tab.title, url: url)
+                            } label: {
+                                Label(
+                                    container.bookmarkManager.isBookmarked(url: url) ? "북마크 해제" : "북마크 추가",
+                                    systemImage: container.bookmarkManager.isBookmarked(url: url) ? "bookmark.fill" : "bookmark"
+                                )
+                            }
+                        }
                         Button { showSettings = true } label: { Label("설정", systemImage: "gearshape") }
                     }
                     // ★ Fire Button (DuckDuckGo 스타일)

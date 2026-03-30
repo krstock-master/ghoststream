@@ -6,6 +6,7 @@ struct BrowserWebView: UIViewRepresentable {
     let tab: Tab
     let privacyEngine: PrivacyEngine
     let downloadManager: MediaDownloadManager
+    let bookmarkManager: BookmarkManager
     let onMediaDetected: (DetectedMedia) -> Void
     @Binding var webViewRef: WKWebView?
 
@@ -22,6 +23,7 @@ struct BrowserWebView: UIViewRepresentable {
         // ★ Fake UA 적용 (DeviceProfile과 일관된 UA)
         webView.customUserAgent = DeviceProfileManager.shared.activeProfile.userAgent
         context.coordinator.downloadManager = downloadManager
+        context.coordinator.bookmarkManager = bookmarkManager
         context.coordinator.observeWebView(webView)
         context.coordinator.webView = webView
         DispatchQueue.main.async { webViewRef = webView }
@@ -73,9 +75,38 @@ extension WebViewCoordinator {
             }
         ]
         objc_setAssociatedObject(self, &Self.kvoKey, obs, .OBJC_ASSOCIATION_RETAIN)
+
+        // ★ 스크롤 방향 감지 (주소바 축소/확장)
+        webView.scrollView.delegate = self
     }
 
     func removeObservers(from webView: WKWebView) {
         objc_setAssociatedObject(self, &Self.kvoKey, nil, .OBJC_ASSOCIATION_RETAIN)
     }
+}
+
+// MARK: - Scroll Direction (주소바 축소/확장)
+extension WebViewCoordinator: UIScrollViewDelegate {
+    private static var lastOffsetKey: UInt8 = 0
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        let currentOffset = scrollView.contentOffset.y
+        let lastOffset = (objc_getAssociatedObject(self, &Self.lastOffsetKey) as? CGFloat) ?? 0
+        let delta = currentOffset - lastOffset
+        objc_setAssociatedObject(self, &Self.lastOffsetKey, currentOffset, .OBJC_ASSOCIATION_RETAIN)
+
+        // 최소 이동량 8pt 이상일 때만 반응 (떨림 방지)
+        guard abs(delta) > 8 else { return }
+        // 맨 위에서는 항상 확장
+        if currentOffset <= 0 {
+            NotificationCenter.default.post(name: .toolbarScrollDirection, object: false) // expand
+            return
+        }
+        // 아래로 스크롤 → 축소, 위로 스크롤 → 확장
+        NotificationCenter.default.post(name: .toolbarScrollDirection, object: delta > 0) // true = compact
+    }
+}
+
+extension Notification.Name {
+    static let toolbarScrollDirection = Notification.Name("toolbarScrollDirection")
 }
