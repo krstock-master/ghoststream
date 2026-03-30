@@ -40,7 +40,7 @@ struct SettingsView: View {
                 } header: { Label("검색", systemImage: "magnifyingglass") }
 
                 Section {
-                    HStack { Text("버전"); Spacer(); Text("0.5.0 (빌드 6)").foregroundStyle(.secondary) }
+                    HStack { Text("버전"); Spacer(); Text("\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") (빌드 \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))").foregroundStyle(.secondary) }
                     NavigationLink("개인정보처리방침") { PrivacyPolicyView() }
                     NavigationLink("오픈소스 라이선스") { LicensesView() }
                 } header: { Label("정보", systemImage: "info.circle") }
