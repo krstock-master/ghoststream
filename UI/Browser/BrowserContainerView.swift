@@ -312,29 +312,64 @@ struct BrowserContainerView: View {
 // MARK: - New Tab Page
 struct NewTabPage: View {
     let onNavigate: (String) -> Void
+    @State private var searchText = ""
+    @FocusState private var isSearchFocused: Bool
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 32) {
-                Spacer().frame(height: 60)
-                VStack(spacing: 8) {
-                    Text("\u{1F47B}").font(.system(size: 56))
-                    Text("GhostStream").font(.system(size: 26, weight: .bold, design: .rounded))
-                    Text("프라이버시 미디어 브라우저").font(.system(size: 13)).foregroundStyle(.secondary)
+            VStack(spacing: 28) {
+                Spacer().frame(height: 50)
+
+                // Logo
+                VStack(spacing: 6) {
+                    Text("\u{1F47B}").font(.system(size: 52))
+                    Text("GhostStream")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
                 }
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: 4), spacing: 20) {
-                    ql("Google", "magnifyingglass", .blue, "https://google.com")
-                    ql("YouTube", "play.rectangle.fill", .red, "https://youtube.com")
-                    ql("네이버", "n.circle.fill", .green, "https://naver.com")
-                    ql("Twitter", "at", .cyan, "https://x.com")
-                    ql("디시인사이드", "bubble.left.fill", .orange, "https://dcinside.com")
-                    ql("인스타", "camera.fill", .purple, "https://instagram.com")
-                    ql("Reddit", "r.circle.fill", .orange, "https://reddit.com")
-                    ql("GitHub", "chevron.left.forwardslash.chevron.right", .gray, "https://github.com")
-                }.padding(.horizontal, 20)
+
+                // Search bar
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary).font(.system(size: 15))
+                    TextField("검색어 또는 주소 입력", text: $searchText)
+                        .textFieldStyle(.plain).font(.system(size: 16))
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .focused($isSearchFocused)
+                        .onSubmit { onNavigate(searchText); searchText = "" }
+                    if !searchText.isEmpty {
+                        Button { searchText = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .background(Color(.tertiarySystemFill))
+                .clipShape(RoundedRectangle(cornerRadius: 24))
+                .padding(.horizontal, 24)
+
+                // Quick links
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("자주 방문").font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary).padding(.leading, 4)
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 18) {
+                        ql("Google", "magnifyingglass", .blue, "https://google.com")
+                        ql("YouTube", "play.rectangle.fill", .red, "https://youtube.com")
+                        ql("네이버", "n.circle.fill", .green, "https://naver.com")
+                        ql("Twitter", "at", .cyan, "https://x.com")
+                        ql("디시인사이드", "bubble.left.fill", .orange, "https://dcinside.com")
+                        ql("인스타", "camera.fill", .purple, "https://instagram.com")
+                        ql("Reddit", "r.circle.fill", .orange, "https://reddit.com")
+                        ql("GitHub", "chevron.left.forwardslash.chevron.right", .gray, "https://github.com")
+                    }
+                }
+                .padding(.horizontal, 20)
+
                 Spacer()
             }
         }.background(Color(.systemBackground))
     }
+
     private func ql(_ n: String, _ i: String, _ c: Color, _ u: String) -> some View {
         Button { onNavigate(u) } label: {
             VStack(spacing: 8) {
