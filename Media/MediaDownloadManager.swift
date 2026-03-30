@@ -4,6 +4,7 @@
 import Foundation
 import AVFoundation
 import SwiftUI
+import WebKit
 
 @Observable
 final class MediaDownloadManager: NSObject, @unchecked Sendable {
