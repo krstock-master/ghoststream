@@ -10,6 +10,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     private var pendingDownloadFilename: String?
 
     var downloadManager: MediaDownloadManager?
+    var bookmarkManager: BookmarkManager?
     weak var webView: WKWebView?   // set by BrowserWebView for cookie forwarding
 
     // CF: tracks domains where we've stripped fingerprint defense scripts
@@ -27,6 +28,19 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     func webView(_ w: WKWebView, didFinish n: WKNavigation!) {
         tab.isLoading = false; tab.title = w.title ?? ""; tab.url = w.url
         tab.canGoBack = w.canGoBack; tab.canGoForward = w.canGoForward
+
+        // ★ 자동 방문 기록
+        if let url = w.url, !tab.isPrivate,
+           url.scheme == "https" || url.scheme == "http" {
+            bookmarkManager?.addHistory(title: w.title ?? url.host ?? "", url: url)
+        }
+
+        // ★ 탭 썸네일 캡처
+        let config = WKSnapshotConfiguration()
+        config.snapshotWidth = 200
+        w.takeSnapshot(with: config) { [weak self] image, _ in
+            DispatchQueue.main.async { self?.tab.thumbnail = image }
+        }
         // Reapply element hider rules
         if let host = w.url?.host {
             let rules = ElementHiderStore.shared.rules(for: host)

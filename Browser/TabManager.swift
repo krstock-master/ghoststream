@@ -20,6 +20,7 @@ final class Tab: Identifiable, @unchecked Sendable {
     var isSecure: Bool = false
     var detectedMedia: [DetectedMedia] = []
     var privacyReport: PrivacyReport = PrivacyReport()
+    var thumbnail: UIImage? // ★ 탭 썸네일 미리보기
 
     // Group support (Vivaldi-style tab stacking)
     var groupID: UUID?

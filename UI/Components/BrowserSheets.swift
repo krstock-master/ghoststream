@@ -211,21 +211,30 @@ struct SamsungTabCard: View {
                                   : Color(.secondarySystemGroupedBackground))
                             .frame(height: 130)
 
-                        // Site favicon / icon
-                        VStack(spacing: 10) {
-                            ZStack {
-                                Circle()
-                                    .fill(tab.isPrivate ? Color.purple.opacity(0.15) : Color(.tertiarySystemFill))
-                                    .frame(width: 48, height: 48)
-                                Image(systemName: tab.isPrivate ? "lock.fill" : "globe")
-                                    .font(.system(size: 20, weight: .medium))
-                                    .foregroundStyle(tab.isPrivate ? Color.purple : Color.teal)
+                        // ★ 썸네일 미리보기 (있으면 표시, 없으면 아이콘)
+                        if let thumbnail = tab.thumbnail {
+                            Image(uiImage: thumbnail)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(height: 130)
+                                .clipped()
+                        } else {
+                            // Site favicon / icon
+                            VStack(spacing: 10) {
+                                ZStack {
+                                    Circle()
+                                        .fill(tab.isPrivate ? Color.purple.opacity(0.15) : Color(.tertiarySystemFill))
+                                        .frame(width: 48, height: 48)
+                                    Image(systemName: tab.isPrivate ? "lock.fill" : "globe")
+                                        .font(.system(size: 20, weight: .medium))
+                                        .foregroundStyle(tab.isPrivate ? Color.purple : Color.teal)
+                                }
+                                Text(tab.displayTitle)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 8)
                             }
-                            Text(tab.displayTitle)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .padding(.horizontal, 8)
                         }
                     }
 

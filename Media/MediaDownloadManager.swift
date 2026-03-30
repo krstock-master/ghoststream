@@ -11,6 +11,10 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
     var downloads: [MediaDownload] = []
     var completedDownloads: [MediaDownload] = []
 
+    // ★ 다운로드 큐 (동시 3개 제한)
+    private var pendingQueue: [(DetectedMedia, Bool, [HTTPCookie]?)] = []
+    private let maxConcurrent = 3
+
     private let vaultManager: VaultManager
     var urlSession: URLSession?
     private var taskMap: [Int: String] = [:]
@@ -33,9 +37,36 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
         urlSession = URLSession(configuration: config, delegate: self, delegateQueue: .main)
     }
 
+    // ★ 활성 다운로드 수
+    private var activeCount: Int {
+        downloads.filter { $0.state == .downloading || $0.state == .converting }.count
+    }
+
+    // ★ 큐에서 대기 중인 다운로드 시작
+    private func processQueue() {
+        while activeCount < maxConcurrent && !pendingQueue.isEmpty {
+            let (media, saveToVault, cookies) = pendingQueue.removeFirst()
+            if let cookies = cookies {
+                downloadWithCookiesInternal(media: media, cookies: cookies, saveToVault: saveToVault)
+            } else {
+                downloadInternal(media: media, saveToVault: saveToVault)
+            }
+        }
+    }
+
     // MARK: - Download API
 
     func download(media: DetectedMedia, saveToVault: Bool = true) {
+        if activeCount >= maxConcurrent {
+            pendingQueue.append((media, saveToVault, nil))
+            NotificationCenter.default.post(name: .downloadCompleted,
+                object: "⏳ 대기열에 추가됨 (\(pendingQueue.count)번째)")
+            return
+        }
+        downloadInternal(media: media, saveToVault: saveToVault)
+    }
+
+    private func downloadInternal(media: DetectedMedia, saveToVault: Bool) {
         let dl = MediaDownload(media: media, saveToVault: saveToVault)
         downloads.insert(dl, at: 0)
 
@@ -53,17 +84,26 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
             if saveToVault {
                 Task { await moveToVault(dl) }
             }
-            completedDownloads.insert(dl, at: 0)
+            completedDownloads.insert(dl, at: 0); processQueue()
         }
     }
 
     // ★ Download with cookies pre-loaded (called from WebViewCoordinator)
     func downloadWithCookies(media: DetectedMedia, cookies: [HTTPCookie], saveToVault: Bool = false) {
-        // Set cookies to shared storage BEFORE starting download
+        if activeCount >= maxConcurrent {
+            pendingQueue.append((media, saveToVault, cookies))
+            NotificationCenter.default.post(name: .downloadCompleted,
+                object: "⏳ 대기열에 추가됨 (\(pendingQueue.count)번째)")
+            return
+        }
+        downloadWithCookiesInternal(media: media, cookies: cookies, saveToVault: saveToVault)
+    }
+
+    private func downloadWithCookiesInternal(media: DetectedMedia, cookies: [HTTPCookie], saveToVault: Bool) {
         let storage = HTTPCookieStorage.shared
         cookies.forEach { storage.setCookie($0) }
         self.cookieStorage = storage
-        download(media: media, saveToVault: saveToVault)
+        downloadInternal(media: media, saveToVault: saveToVault)
     }
 
     func pause(_ dl: MediaDownload) {
@@ -334,7 +374,7 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
                     dl.state = .completed
                     dl.progress = 1.0
                     self.downloads.removeAll { $0.id == dl.id }
-                    self.completedDownloads.insert(dl, at: 0)
+                    self.completedDownloads.insert(dl, at: 0); self.processQueue()
                     NotificationCenter.default.post(name: .downloadCompleted, object: dl.media.title)
                 }
             } else {
@@ -347,7 +387,7 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
                     dl.state = .completed
                     dl.progress = 1.0
                     self.downloads.removeAll { $0.id == dl.id }
-                    self.completedDownloads.insert(dl, at: 0)
+                    self.completedDownloads.insert(dl, at: 0); self.processQueue()
                     NotificationCenter.default.post(name: .downloadCompleted, object: dl.media.title)
                 }
             }
@@ -360,7 +400,7 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
                 dl.state = .completed
                 dl.progress = 1.0
                 self.downloads.removeAll { $0.id == dl.id }
-                self.completedDownloads.insert(dl, at: 0)
+                self.completedDownloads.insert(dl, at: 0); self.processQueue()
             }
         }
 
@@ -487,7 +527,7 @@ extension MediaDownloadManager: URLSessionDownloadDelegate {
             dl.state = .completed
             dl.progress = 1.0
             downloads.removeAll { $0.id == dl.id }
-            completedDownloads.insert(dl, at: 0)
+            completedDownloads.insert(dl, at: 0); processQueue()
             NotificationCenter.default.post(name: .downloadCompleted, object: "\(dl.media.title) 다운로드 완료 (\(ByteCountFormatter.string(fromByteCount: Int64(fileSize), countStyle: .file)))")
             if dl.saveToVault { Task { await moveToVault(dl) } }
         } catch {

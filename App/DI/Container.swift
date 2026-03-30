@@ -10,6 +10,7 @@ final class DIContainer: @unchecked Sendable {
     let dnsManager: DNSManager
     let contentBlocker: ContentBlockerManager
     let settingsStore: SettingsStore
+    let bookmarkManager: BookmarkManager
 
     init() {
         self.settingsStore = SettingsStore()
@@ -19,6 +20,7 @@ final class DIContainer: @unchecked Sendable {
         self.vaultManager = VaultManager()
         self.downloadManager = MediaDownloadManager(vaultManager: vaultManager)
         self.tabManager = TabManager()
+        self.bookmarkManager = BookmarkManager()
     }
 }
 
