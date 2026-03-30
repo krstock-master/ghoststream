@@ -38,6 +38,7 @@ targets:
           - "*.yml"
           - "*.bat"
           - "*.plist"
+          - "*.jsx"
           - .github/**
           - .git/**
           - .gitignore
