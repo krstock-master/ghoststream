@@ -26,12 +26,17 @@ final class Tab: Identifiable, @unchecked Sendable {
     var groupID: UUID?
     var groupName: String?
 
-    init(isPrivate: Bool = false, url: URL? = nil) {
+    init(isPrivate: Bool = false, url: URL? = nil, sharedStore: WKWebsiteDataStore? = nil) {
         self.id = UUID()
         self.isPrivate = isPrivate
         self.url = url
-        // 각 탭마다 완전히 독립된 비영구 저장소 → 쿠키 격리
-        self.dataStore = WKWebsiteDataStore.nonPersistent()
+        // ★ F5 FIX: 일반 탭은 공유 스토어 사용 (CF 쿠키 공유)
+        // 프라이빗 탭만 개별 격리 스토어 사용
+        if isPrivate {
+            self.dataStore = WKWebsiteDataStore.nonPersistent()
+        } else {
+            self.dataStore = sharedStore ?? WKWebsiteDataStore.nonPersistent()
+        }
     }
 
     var displayTitle: String {
@@ -65,6 +70,9 @@ final class TabManager: @unchecked Sendable {
     // Tab groups
     var groups: [TabGroup] = []
 
+    // ★ F5: 일반 탭 공유 쿠키 스토어 (CF clearance 쿠키 공유)
+    let sharedDataStore = WKWebsiteDataStore.nonPersistent()
+
     var activeTab: Tab? {
         tabs.first { $0.id == activeTabID }
     }
@@ -74,7 +82,7 @@ final class TabManager: @unchecked Sendable {
     }
 
     init() {
-        let initial = Tab(url: nil)
+        let initial = Tab(url: nil, sharedStore: sharedDataStore)
         tabs = [initial]
         activeTabID = initial.id
     }
@@ -83,7 +91,7 @@ final class TabManager: @unchecked Sendable {
 
     @discardableResult
     func newTab(url: URL? = nil, isPrivate: Bool = false, switchTo: Bool = true) -> Tab {
-        let tab = Tab(isPrivate: isPrivate, url: url)
+        let tab = Tab(isPrivate: isPrivate, url: url, sharedStore: isPrivate ? nil : sharedDataStore)
         tabs.append(tab)
         if switchTo {
             activeTabID = tab.id
