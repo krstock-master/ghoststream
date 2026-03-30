@@ -17,8 +17,6 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
 
     // Injected from BrowserWebView when a download starts (cookie forwarding)
     var cookieStorage: HTTPCookieStorage = .shared
-    // ★ WKWebView reference for WKDownload API (fastest approach)
-    weak var webViewRef: WKWebView?
 
     init(vaultManager: VaultManager) {
         self.vaultManager = vaultManager
