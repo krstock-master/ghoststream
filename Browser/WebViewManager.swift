@@ -90,6 +90,26 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
     func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
 
+    // MARK: - Block App Store redirects (PikPak 등)
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        guard let url = navigationAction.request.url else { decisionHandler(.allow); return }
+        let scheme = url.scheme?.lowercased() ?? ""
+        // Block app store, intent, and custom scheme redirects
+        if ["itms-apps", "itms-appss", "itms", "intent", "pikpak", "market"].contains(scheme) {
+            decisionHandler(.cancel)
+            return
+        }
+        // Block App Store URLs
+        if url.host?.contains("apps.apple.com") == true || url.host?.contains("itunes.apple.com") == true {
+            if navigationAction.navigationType == .other || navigationAction.targetFrame == nil {
+                // 사용자가 직접 클릭하지 않은 자동 리다이렉트는 차단
+                decisionHandler(.cancel)
+                return
+            }
+        }
+        decisionHandler(.allow)
+    }
+
     // MARK: - Intercept media responses → WKDownload
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         let url = navigationResponse.response.url
@@ -176,8 +196,10 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             if (isVideo || isImage) && size > 1024 {
                 PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
                     guard status == .authorized || status == .limited else { return }
+                    var placeholder: PHObjectPlaceholder?
                     PHPhotoLibrary.shared().performChanges({
                         let req = PHAssetCreationRequest.forAsset()
+                        placeholder = req.placeholderForCreatedAsset
                         if isVideo {
                             req.addResource(with: .video, fileURL: filePath, options: nil)
                         } else if ext == "gif", let data = try? Data(contentsOf: filePath) {
@@ -188,6 +210,10 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                     }) { success, _ in
                         DispatchQueue.main.async {
                             if success {
+                                // ★ PHAsset localIdentifier 저장 (나중에 정확한 삭제용)
+                                if let id = placeholder?.localIdentifier {
+                                    GalleryAssetTracker.shared.track(filename: fname ?? "", assetID: id)
+                                }
                                 NotificationCenter.default.post(name: .downloadCompleted,
                                     object: "✅ \(title) 다운로드 + 갤러리 저장 완료 (\(sizeStr))")
                             } else {
@@ -500,7 +526,7 @@ enum WebViewConfigurator {
 
     // ★ Pattern matching for video URLs
     var vidPat=/\\.(mp4|webm|m4v|mov|m3u8|ts|mpd)(\\?|#|$)/i;
-    var cdnPat=/videoplayback|googlevideo|fbcdn.*video|cdninstagram.*video|twimg.*video|pbs\\.twimg|video-.*akamai|cloudfront.*video|vod.*akamaized/i;
+    var cdnPat=/videoplayback|googlevideo|fbcdn.*video|cdninstagram.*video|twimg.*video|pbs\\.twimg|video-.*akamai|cloudfront.*video|vod.*akamaized|mypikpak\\.com/i;
     function isVideoURL(u){return vidPat.test(u)||cdnPat.test(u);}
     function typeFromURL(u){
         if(u.includes('.m3u8'))return 'hls';
@@ -622,7 +648,7 @@ enum WebViewConfigurator {
         // 4. Re-scan Performance API right now
         try{
             var vidPat=/\\.(mp4|webm|m4v|mov|m3u8|ts)(\\?|#|$)/i;
-            var cdnPat=/videoplayback|googlevideo|fbcdn.*video|cdninstagram.*video|twimg.*video/i;
+            var cdnPat=/videoplayback|googlevideo|fbcdn.*video|cdninstagram.*video|twimg.*video|mypikpak\\.com/i;
             var entries=performance.getEntriesByType('resource');
             for(var j=entries.length-1;j>=0;j--){
                 var name=entries[j].name;
@@ -680,7 +706,7 @@ enum WebViewConfigurator {
         // Re-scan Performance API
         try{
             var vidPat=/\\.(mp4|webm|m4v|mov|m3u8|ts)(\\?|#|$)/i;
-            var cdnPat=/videoplayback|googlevideo|fbcdn.*video|cdninstagram.*video|twimg.*video/i;
+            var cdnPat=/videoplayback|googlevideo|fbcdn.*video|cdninstagram.*video|twimg.*video|mypikpak\\.com/i;
             performance.getEntriesByType('resource').forEach(function(entry){
                 if(vidPat.test(entry.name)||cdnPat.test(entry.name)){
                     E(entry.name,entry.name.includes('.m3u8')?'hls':'mp4','PerfScan');
@@ -790,6 +816,31 @@ enum WebViewConfigurator {
         });
         // body overflow 복원
         if(document.body.style.overflow==='hidden')document.body.style.overflow='';
+        // ★ 4. 앱 설치 유도 팝업/배너 차단 (PikPak, 일반 사이트)
+        var appBannerSels=[
+            'meta[name="apple-itunes-app"]', // Smart App Banner
+            '.smart-banner','.smartbanner','#smart-app-banner',
+            '[class*="app-banner"]','[class*="app-download"]','[class*="download-app"]',
+            '[class*="app-install"]','[class*="install-app"]',
+            '[class*="open-in-app"]','[class*="openInApp"]',
+            '[class*="app-promotion"]','[class*="app-promo"]',
+            '[id*="app-banner"]','[id*="app-download"]',
+            '.app-download-bar','.app-open-bar','.bottom-app-bar',
+            // PikPak 특화
+            '[class*="pikpak"]','[class*="download-guide"]',
+            '.guide-mask','.guide-popup','.app-guide',
+            '[class*="deeplink"]','[class*="deep-link"]'
+        ];
+        appBannerSels.forEach(function(sel){
+            document.querySelectorAll(sel).forEach(function(el){
+                if(el.tagName==='META'){el.remove();}
+                else{el.style.display='none';el.remove();}
+            });
+        });
+        // intent:// 스킴 리다이렉트 차단
+        document.querySelectorAll('a[href*="intent://"],a[href*="itms-apps://"],a[href*="pikpak://"]').forEach(function(a){
+            a.removeAttribute('href');a.style.pointerEvents='none';
+        });
     }
     setTimeout(dismissCookieBanners,500);
     setTimeout(dismissCookieBanners,2000);
@@ -802,7 +853,7 @@ enum WebViewConfigurator {
         // Re-scan Performance API periodically
         try{
             var vidPat=/\\.(mp4|webm|m4v|mov|m3u8|ts)(\\?|#|$)/i;
-            var cdnPat=/videoplayback|googlevideo|fbcdn.*video|cdninstagram.*video|twimg.*video/i;
+            var cdnPat=/videoplayback|googlevideo|fbcdn.*video|cdninstagram.*video|twimg.*video|mypikpak\\.com/i;
             performance.getEntriesByType('resource').forEach(function(entry){
                 if(vidPat.test(entry.name)||cdnPat.test(entry.name)){
                     E(entry.name,entry.name.includes('.m3u8')?'hls':'mp4','Periodic');
@@ -812,6 +863,24 @@ enum WebViewConfigurator {
     },4000);
     })();
     """
+}
+
+// MARK: - Gallery Asset Tracker (갤러리 저장 시 PHAsset ID 추적)
+final class GalleryAssetTracker {
+    static let shared = GalleryAssetTracker()
+    private var map: [String: String] = [:] // filename → PHAsset localIdentifier
+
+    func track(filename: String, assetID: String) {
+        map[filename] = assetID
+    }
+
+    func assetID(for filename: String) -> String? {
+        return map[filename]
+    }
+
+    func remove(filename: String) {
+        map.removeValue(forKey: filename)
+    }
 }
 
 // MARK: - Notifications
