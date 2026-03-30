@@ -36,7 +36,7 @@ struct DownloadsManagerView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("다운로드").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("닫기") { dismiss() } } }
-            .fullScreenCover(isPresented: $showPlayer) {
+            .sheet(isPresented: $showPlayer) {
                 if let url = playerURL {
                     VideoPlayerSheet(url: url, isPresented: $showPlayer)
                 }
@@ -267,21 +267,64 @@ struct DownloadsManagerView: View {
             return
         }
 
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { [self] status in
-            guard status == .authorized || status == .limited else { return }
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .downloadFailed, object: "사진 앱 접근 권한이 필요합니다")
+                }
+                return
+            }
 
             if isVideoFile {
-                // UISaveVideoAtPathToSavedPhotosAlbum — most reliable for sideloaded apps
-                UISaveVideoAtPathToSavedPhotosAlbum(url.path, nil, nil, nil)
+                // Check file exists and has content before saving
+                guard FileManager.default.fileExists(atPath: url.path),
+                      (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0 > 0 else {
+                    DispatchQueue.main.async {
+                        NotificationCenter.default.post(name: .downloadFailed, object: "파일이 비어있거나 존재하지 않습니다")
+                    }
+                    return
+                }
+                // Use PHPhotoLibrary for better error handling
+                PHPhotoLibrary.shared().performChanges({
+                    let req = PHAssetCreationRequest.forAsset()
+                    req.addResource(with: .video, fileURL: url, options: nil)
+                }) { success, error in
+                    DispatchQueue.main.async {
+                        if success {
+                            NotificationCenter.default.post(name: .downloadCompleted, object: "갤러리에 저장 완료")
+                        } else {
+                            // Fallback to UIKit API
+                            UISaveVideoAtPathToSavedPhotosAlbum(url.path, nil, nil, nil)
+                            NotificationCenter.default.post(name: .downloadCompleted, object: "갤러리에 저장됨")
+                        }
+                    }
+                }
             } else if isImageFile {
-                if let image = UIImage(contentsOfFile: url.path) {
-                    UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
-                } else if ext == "gif",
-                          let data = try? Data(contentsOf: url) {
+                if ext == "gif", let data = try? Data(contentsOf: url) {
                     // GIF via PHPhotoLibrary to preserve animation
-                    PHPhotoLibrary.shared().performChanges {
+                    PHPhotoLibrary.shared().performChanges({
                         let req = PHAssetCreationRequest.forAsset()
                         req.addResource(with: .photo, data: data, options: nil)
+                    }) { success, error in
+                        DispatchQueue.main.async {
+                            if success {
+                                NotificationCenter.default.post(name: .downloadCompleted, object: "GIF 갤러리에 저장 완료")
+                            } else {
+                                NotificationCenter.default.post(name: .downloadFailed, object: error?.localizedDescription ?? "GIF 저장 실패")
+                            }
+                        }
+                    }
+                } else if let image = UIImage(contentsOfFile: url.path) {
+                    PHPhotoLibrary.shared().performChanges({
+                        PHAssetCreationRequest.forAsset().addResource(with: .photo, data: image.pngData() ?? Data(), options: nil)
+                    }) { success, error in
+                        DispatchQueue.main.async {
+                            if success {
+                                NotificationCenter.default.post(name: .downloadCompleted, object: "이미지 갤러리에 저장 완료")
+                            } else {
+                                NotificationCenter.default.post(name: .downloadFailed, object: error?.localizedDescription ?? "이미지 저장 실패")
+                            }
+                        }
                     }
                 }
             }
@@ -337,96 +380,152 @@ struct VideoPlayerSheet: View {
     @State private var player: AVPlayer?
     @State private var isReady = false
     @State private var errorMsg: String?
+    @State private var isLoading = true
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
 
-            if let player, isReady {
-                VideoPlayer(player: player)
-                    .ignoresSafeArea()
-            } else if let err = errorMsg {
-                VStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 36)).foregroundStyle(.orange)
-                    Text("재생 실패").font(.headline).foregroundStyle(.white)
-                    Text(err).font(.caption).foregroundStyle(.gray)
-                        .multilineTextAlignment(.center).padding(.horizontal, 24)
-                    Button("닫기") { isPresented = false }
-                        .foregroundStyle(.teal)
+                if let player, isReady {
+                    VideoPlayer(player: player)
+                        .ignoresSafeArea()
+                } else if let err = errorMsg {
+                    VStack(spacing: 16) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 40)).foregroundStyle(.orange)
+                        Text("재생 실패").font(.headline).foregroundStyle(.white)
+                        Text(err).font(.caption).foregroundStyle(.gray)
+                            .multilineTextAlignment(.center).padding(.horizontal, 24)
+                        Button("닫기") { cleanupAndDismiss() }
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 24).padding(.vertical, 10)
+                            .background(.teal, in: Capsule())
+                    }
+                } else {
+                    VStack(spacing: 12) {
+                        ProgressView().scaleEffect(1.5).tint(.white)
+                        Text("로딩 중...").font(.caption).foregroundStyle(.gray)
+                    }
                 }
-            } else {
-                ProgressView().scaleEffect(1.5).tint(.white)
             }
-
-            // Close button — always on top
-            VStack {
-                HStack {
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        player?.pause()
-                        isPresented = false
+                        cleanupAndDismiss()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.6), radius: 6)
+                            .font(.system(size: 24))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .shadow(color: .black.opacity(0.5), radius: 4)
                     }
-                    .padding(.leading, 16)
-                    .padding(.top, 52)
-                    Spacer()
                 }
-                Spacer()
             }
+            .toolbarBackground(.hidden, for: .navigationBar)
         }
         .onAppear { Task { await loadPlayer() } }
-        .onDisappear { player?.pause() }
-        .gesture(
-            DragGesture(minimumDistance: 60, coordinateSpace: .local)
-                .onEnded { v in
-                    if v.translation.height > 60 {
-                        player?.pause()
-                        isPresented = false
-                    }
-                }
-        )
+        .onDisappear { player?.pause(); player = nil }
         .interactiveDismissDisabled(false)
+    }
+
+    private func cleanupAndDismiss() {
+        player?.pause()
+        player = nil
+        isPresented = false
     }
 
     @MainActor
     private func loadPlayer() async {
         let ext = url.pathExtension.lowercased()
-        let asset: AVURLAsset
 
-        if ext == "movpkg" || ext == "m3u8" {
-            // These need AVURLAsset with proper loading
-            asset = AVURLAsset(url: url)
-        } else {
-            // MP4/MOV/GIF — direct
-            asset = AVURLAsset(url: url)
-        }
-
-        // Check file exists
+        // Check file exists for local files
         if !["http","https"].contains(url.scheme ?? "") {
             guard FileManager.default.fileExists(atPath: url.path) else {
                 errorMsg = "파일을 찾을 수 없습니다\n\(url.lastPathComponent)"
+                isLoading = false
                 return
             }
         }
 
+        // For movpkg: try export to mp4 first, then play
+        if ext == "movpkg" {
+            do {
+                let mp4URL = try await exportMovpkgToMP4(url)
+                let p = AVPlayer(url: mp4URL)
+                player = p
+                isReady = true
+                isLoading = false
+                p.play()
+            } catch {
+                // Fallback: try direct AVPlayer on movpkg
+                let asset = AVURLAsset(url: url)
+                do {
+                    let tracks = try await asset.loadTracks(withMediaType: .video)
+                    if !tracks.isEmpty {
+                        let p = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+                        player = p
+                        isReady = true
+                        p.play()
+                    } else {
+                        errorMsg = "재생 가능한 트랙 없음 (movpkg)"
+                    }
+                } catch {
+                    errorMsg = "movpkg 재생 실패: \(error.localizedDescription)"
+                }
+                isLoading = false
+            }
+            return
+        }
+
+        // Standard video files
+        let asset = AVURLAsset(url: url)
         do {
-            // Load playable tracks
             let tracks = try await asset.loadTracks(withMediaType: .video)
             if tracks.isEmpty {
-                errorMsg = "재생 가능한 트랙 없음\n포맷: \(ext)"
-                return
+                // For audio files, try audio tracks
+                let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+                if audioTracks.isEmpty {
+                    errorMsg = "재생 가능한 트랙 없음\n포맷: \(ext)"
+                    isLoading = false
+                    return
+                }
             }
             let item = AVPlayerItem(asset: asset)
             let p = AVPlayer(playerItem: item)
             player = p
             isReady = true
+            isLoading = false
             p.play()
         } catch {
             errorMsg = error.localizedDescription
+            isLoading = false
+        }
+    }
+
+    private func exportMovpkgToMP4(_ movpkgURL: URL) async throws -> URL {
+        let asset = AVURLAsset(url: movpkgURL)
+        let presets = AVAssetExportSession.exportPresets(compatibleWith: asset)
+        let preset = presets.contains(AVAssetExportPresetPassthrough)
+            ? AVAssetExportPresetPassthrough : AVAssetExportPresetHighestQuality
+        guard let session = AVAssetExportSession(asset: asset, presetName: preset) else {
+            throw NSError(domain: "GhostStream", code: -1, userInfo: [NSLocalizedDescriptionKey: "Export session 생성 실패"])
+        }
+        let dest = movpkgURL.deletingPathExtension().appendingPathExtension("mp4")
+        if FileManager.default.fileExists(atPath: dest.path) {
+            // Already exported, just return
+            return dest
+        }
+        session.outputURL = dest
+        session.outputFileType = .mp4
+        session.shouldOptimizeForNetworkUse = true
+
+        await session.export()
+        if session.status == .completed {
+            return dest
+        } else {
+            throw session.error ?? NSError(domain: "GhostStream", code: -2, userInfo: [NSLocalizedDescriptionKey: "MP4 변환 실패"])
         }
     }
 }

@@ -361,6 +361,39 @@ enum WebViewConfigurator {
         }
     },true);
 
+    // ===== DYNAMIC AD REMOVAL (Layer 3 — JS-based) =====
+    var adObserver=new MutationObserver(function(mutations){
+        mutations.forEach(function(m){
+            m.addedNodes.forEach(function(node){
+                if(node.nodeType!==1)return;
+                // Remove ad iframes
+                if(node.tagName==='IFRAME'){
+                    var s=node.src||'';
+                    if(s.match(/ad[.s]|doubleclick|googlesyndication|adfit|cauly|mobon|adpopcorn|realclick|admixer/i)){
+                        node.style.display='none';node.remove();
+                        window.webkit.messageHandlers.privacyEvent.postMessage({event:'ad_blocked'});
+                    }
+                }
+                // Remove ad divs by ID/class patterns
+                var el=node;
+                if(el.id&&el.id.match(/^(ad[-_]|ads[-_]|adv[-_]|banner|sponsor|dcAd|google_ads)/i)){
+                    el.style.display='none';
+                    window.webkit.messageHandlers.privacyEvent.postMessage({event:'ad_blocked'});
+                }
+                if(el.className&&typeof el.className==='string'&&el.className.match(/\b(ad[-_]|ads[-_]|adv[-_]|banner|sponsor|promo|ad_bottom|ad_center|appending_promo|adcenter)\b/i)){
+                    el.style.display='none';
+                    window.webkit.messageHandlers.privacyEvent.postMessage({event:'ad_blocked'});
+                }
+                // Remove ins.adsbygoogle
+                if(el.tagName==='INS'&&el.className&&el.className.indexOf('adsbygoogle')!==-1){
+                    el.style.display='none';
+                    window.webkit.messageHandlers.privacyEvent.postMessage({event:'ad_blocked'});
+                }
+            });
+        });
+    });
+    if(document.body)adObserver.observe(document.body,{childList:true,subtree:true});
+
     new MutationObserver(scan).observe(document.body||document.documentElement,{childList:true,subtree:true});
     setTimeout(scan,800);setTimeout(scan,2500);setTimeout(scan,5000);
     // Periodic re-scan for dynamically loaded videos (YouTube, TikTok etc)

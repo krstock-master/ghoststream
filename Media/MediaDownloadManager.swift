@@ -12,8 +12,8 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
 
     private let vaultManager: VaultManager
     private var urlSession: URLSession?
-    private var hlsSession: AVAssetDownloadURLSession?
     private var taskMap: [Int: String] = [:]
+    private var hlsTaskMap: [UUID: Task<Void, Never>] = [:]
 
     // Injected from BrowserWebView when a download starts (cookie forwarding)
     var cookieStorage: HTTPCookieStorage = .shared
@@ -29,16 +29,6 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
         config.timeoutIntervalForResource = 600
         config.waitsForConnectivity = true
         urlSession = URLSession(configuration: config, delegate: self, delegateQueue: .main)
-
-        // HLS session — also foreground
-        let hlsConfig = URLSessionConfiguration.background(withIdentifier: "com.ghoststream.hls.\(Int(Date().timeIntervalSince1970))")
-        hlsConfig.isDiscretionary = false
-        hlsConfig.sessionSendsLaunchEvents = false
-        hlsSession = AVAssetDownloadURLSession(
-            configuration: hlsConfig,
-            assetDownloadDelegate: self,
-            delegateQueue: .main
-        )
     }
 
     // MARK: - Download API
@@ -118,51 +108,228 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
         }
     }
 
-    // MARK: - HLS Download
+    // MARK: - HLS Download (Foreground Custom Parser)
 
     private func startHLSDownload(_ dl: MediaDownload) {
-        // First try AVAssetDownloadTask (native HLS download → .movpkg → auto-convert to .mp4)
-        let ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
-        var cookieHeader = ""
-        if let cookies = cookieStorage.cookies(for: dl.media.url), !cookies.isEmpty {
-            cookieHeader = cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+        dl.state = .downloading
+
+        let hlsTask = Task {
+            do {
+                let ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+
+                // Step 1: Download the m3u8 playlist
+                var request = URLRequest(url: dl.media.url)
+                request.setValue(ua, forHTTPHeaderField: "User-Agent")
+                request.setValue(dl.media.referer, forHTTPHeaderField: "Referer")
+                if let cookies = cookieStorage.cookies(for: dl.media.url), !cookies.isEmpty {
+                    request.setValue(cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; "), forHTTPHeaderField: "Cookie")
+                }
+
+                guard let session = urlSession else {
+                    dl.state = .failed; dl.error = "URLSession 없음"; return
+                }
+
+                let (data, _) = try await session.data(for: request)
+                guard let playlist = String(data: data, encoding: .utf8) else {
+                    dl.state = .failed; dl.error = "m3u8 파싱 실패"; return
+                }
+
+                // Step 2: If master playlist, find best quality media playlist
+                var mediaPlaylistURL = dl.media.url
+                if playlist.contains("#EXT-X-STREAM-INF") {
+                    if let bestURL = parseMasterPlaylist(playlist, baseURL: dl.media.url) {
+                        mediaPlaylistURL = bestURL
+                        // Re-download media playlist
+                        var mediaReq = URLRequest(url: mediaPlaylistURL)
+                        mediaReq.setValue(ua, forHTTPHeaderField: "User-Agent")
+                        mediaReq.setValue(dl.media.referer, forHTTPHeaderField: "Referer")
+                        if let cookies = cookieStorage.cookies(for: mediaPlaylistURL), !cookies.isEmpty {
+                            mediaReq.setValue(cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; "), forHTTPHeaderField: "Cookie")
+                        }
+                        let (mediaData, _) = try await session.data(for: mediaReq)
+                        guard let mediaPlaylist = String(data: mediaData, encoding: .utf8) else {
+                            dl.state = .failed; dl.error = "미디어 플레이리스트 파싱 실패"; return
+                        }
+                        try await downloadTSSegments(mediaPlaylist, baseURL: mediaPlaylistURL, dl: dl, ua: ua)
+                    } else {
+                        dl.state = .failed; dl.error = "마스터 플레이리스트에서 미디어 URL 추출 실패"; return
+                    }
+                } else if playlist.contains("#EXTINF") {
+                    // Already a media playlist
+                    try await downloadTSSegments(playlist, baseURL: mediaPlaylistURL, dl: dl, ua: ua)
+                } else {
+                    // Not a valid m3u8 — try as direct download fallback
+                    startDirectDownload(dl)
+                    return
+                }
+            } catch {
+                if !Task.isCancelled {
+                    await MainActor.run {
+                        dl.state = .failed
+                        dl.error = "HLS 다운로드 실패: \(error.localizedDescription)"
+                    }
+                }
+            }
         }
-        var headers: [String: String] = [
-            "Referer": dl.media.referer,
-            "User-Agent": ua,
-            "Origin": dl.media.referer.isEmpty ? "" : {
-                guard let u = URL(string: dl.media.referer), let h = u.host else { return "" }
-                return (u.scheme ?? "https") + "://" + h
-            }()
-        ]
-        if !cookieHeader.isEmpty { headers["Cookie"] = cookieHeader }
+        hlsTaskMap[dl.id] = hlsTask
+    }
 
-        let options: [String: Any] = ["AVURLAssetHTTPHeaderFieldsKey": headers]
-        let asset = AVURLAsset(url: dl.media.url, options: options)
+    private func parseMasterPlaylist(_ playlist: String, baseURL: URL) -> URL? {
+        let lines = playlist.components(separatedBy: .newlines)
+        var bestBandwidth = 0
+        var bestURI: String?
 
-        let bitrate: Int
-        switch dl.media.quality {
-        case let q where q.contains("1080"): bitrate = 4_000_000
-        case let q where q.contains("720"):  bitrate = 2_000_000
-        case let q where q.contains("480"):  bitrate = 1_000_000
-        default:                              bitrate = 2_500_000
+        for i in 0..<lines.count {
+            let line = lines[i]
+            if line.hasPrefix("#EXT-X-STREAM-INF") {
+                // Parse BANDWIDTH
+                if let bwRange = line.range(of: "BANDWIDTH="),
+                   let bwEnd = line[bwRange.upperBound...].firstIndex(where: { $0 == "," || $0 == "\n" || $0 == "\r" }) {
+                    let bwStr = String(line[bwRange.upperBound..<bwEnd])
+                    let bw = Int(bwStr) ?? 0
+                    if bw > bestBandwidth {
+                        bestBandwidth = bw
+                        // Next non-comment line is the URI
+                        if i + 1 < lines.count {
+                            let uri = lines[i + 1].trimmingCharacters(in: .whitespaces)
+                            if !uri.isEmpty && !uri.hasPrefix("#") {
+                                bestURI = uri
+                            }
+                        }
+                    }
+                } else if i + 1 < lines.count {
+                    // No bandwidth, just use first stream
+                    let uri = lines[i + 1].trimmingCharacters(in: .whitespaces)
+                    if !uri.isEmpty && !uri.hasPrefix("#") && bestURI == nil {
+                        bestURI = uri
+                    }
+                }
+            }
         }
 
-        guard let task = hlsSession?.makeAssetDownloadTask(
-            asset: asset,
-            assetTitle: "gs_\(Int(Date().timeIntervalSince1970))",
-            assetArtworkData: nil,
-            options: [AVAssetDownloadTaskMinimumRequiredMediaBitrateKey: bitrate]
-        ) else {
-            dl.state = .failed
-            dl.error = "HLS 세션 생성 실패 – m3u8 URL을 직접 재생해 보세요"
+        guard let uri = bestURI else { return nil }
+        if uri.hasPrefix("http") { return URL(string: uri) }
+        return URL(string: uri, relativeTo: baseURL)?.absoluteURL
+    }
+
+    private func downloadTSSegments(_ playlist: String, baseURL: URL, dl: MediaDownload, ua: String) async throws {
+        let lines = playlist.components(separatedBy: .newlines)
+        var segmentURLs: [URL] = []
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            if let segURL = trimmed.hasPrefix("http") ? URL(string: trimmed) : URL(string: trimmed, relativeTo: baseURL)?.absoluteURL {
+                segmentURLs.append(segURL)
+            }
+        }
+
+        guard !segmentURLs.isEmpty else {
+            await MainActor.run { dl.state = .failed; dl.error = "TS 세그먼트를 찾을 수 없습니다" }
             return
         }
 
-        dl.sessionTaskID = task.taskIdentifier
-        dl.state = .downloading
-        taskMap[task.taskIdentifier] = dl.id.uuidString
-        task.resume()
+        let totalSegments = segmentURLs.count
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("hls_\(dl.id.uuidString)")
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        var downloadedFiles: [URL] = []
+
+        // Download segments sequentially (3 concurrent)
+        for (index, segURL) in segmentURLs.enumerated() {
+            guard !Task.isCancelled else { throw CancellationError() }
+
+            var segReq = URLRequest(url: segURL)
+            segReq.setValue(ua, forHTTPHeaderField: "User-Agent")
+            segReq.setValue(dl.media.referer, forHTTPHeaderField: "Referer")
+            if let cookies = cookieStorage.cookies(for: segURL), !cookies.isEmpty {
+                segReq.setValue(cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; "), forHTTPHeaderField: "Cookie")
+            }
+
+            let (segData, _) = try await urlSession!.data(for: segReq)
+            let segFile = tempDir.appendingPathComponent(String(format: "seg_%05d.ts", index))
+            try segData.write(to: segFile)
+            downloadedFiles.append(segFile)
+
+            await MainActor.run {
+                dl.progress = Double(index + 1) / Double(totalSegments)
+                dl.bytesDownloaded = Int64(downloadedFiles.reduce(0) { $0 + (try? Data(contentsOf: $1).count ?? 0) })
+            }
+        }
+
+        // Merge TS segments into single file
+        await MainActor.run { dl.state = .converting }
+
+        let mergedTS = tempDir.appendingPathComponent("merged.ts")
+        FileManager.default.createFile(atPath: mergedTS.path, contents: nil)
+        let fileHandle = try FileHandle(forWritingTo: mergedTS)
+        for tsFile in downloadedFiles {
+            let data = try Data(contentsOf: tsFile)
+            fileHandle.write(data)
+        }
+        fileHandle.closeFile()
+
+        // Export TS → MP4 using AVAssetExportSession
+        let safeName = "\(dl.media.title.prefix(40))_\(Int(Date().timeIntervalSince1970))"
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+        let mp4URL = Self.downloadDirectory.appendingPathComponent("\(safeName).mp4")
+
+        let asset = AVURLAsset(url: mergedTS)
+        let presets = AVAssetExportSession.exportPresets(compatibleWith: asset)
+        let preset = presets.contains(AVAssetExportPresetPassthrough) ? AVAssetExportPresetPassthrough : AVAssetExportPresetHighestQuality
+
+        if let exportSession = AVAssetExportSession(asset: asset, presetName: preset) {
+            if FileManager.default.fileExists(atPath: mp4URL.path) {
+                try? FileManager.default.removeItem(at: mp4URL)
+            }
+            exportSession.outputURL = mp4URL
+            exportSession.outputFileType = .mp4
+            exportSession.shouldOptimizeForNetworkUse = true
+
+            await exportSession.export()
+
+            if exportSession.status == .completed {
+                await MainActor.run {
+                    dl.localURL = mp4URL
+                    dl.hlsConversionStatus = "MP4 변환 완료"
+                    dl.state = .completed
+                    dl.progress = 1.0
+                    self.downloads.removeAll { $0.id == dl.id }
+                    self.completedDownloads.insert(dl, at: 0)
+                    NotificationCenter.default.post(name: .downloadCompleted, object: dl.media.title)
+                }
+            } else {
+                // Fallback: keep merged TS as playable file
+                let tsDestURL = Self.downloadDirectory.appendingPathComponent("\(safeName).ts")
+                try? FileManager.default.moveItem(at: mergedTS, to: tsDestURL)
+                await MainActor.run {
+                    dl.localURL = tsDestURL
+                    dl.hlsConversionStatus = "TS 저장 (변환 실패)"
+                    dl.state = .completed
+                    dl.progress = 1.0
+                    self.downloads.removeAll { $0.id == dl.id }
+                    self.completedDownloads.insert(dl, at: 0)
+                    NotificationCenter.default.post(name: .downloadCompleted, object: dl.media.title)
+                }
+            }
+        } else {
+            // No export session — keep TS
+            let tsDestURL = Self.downloadDirectory.appendingPathComponent("\(safeName).ts")
+            try? FileManager.default.moveItem(at: mergedTS, to: tsDestURL)
+            await MainActor.run {
+                dl.localURL = tsDestURL
+                dl.state = .completed
+                dl.progress = 1.0
+                self.downloads.removeAll { $0.id == dl.id }
+                self.completedDownloads.insert(dl, at: 0)
+            }
+        }
+
+        // Cleanup temp dir
+        try? FileManager.default.removeItem(at: tempDir)
+
+        if dl.saveToVault { Task { await moveToVault(dl) } }
     }
 
     // MARK: - Post-Download
@@ -243,102 +410,16 @@ extension MediaDownloadManager: URLSessionDownloadDelegate {
     }
 }
 
-// MARK: - AVAssetDownloadDelegate
-extension MediaDownloadManager: AVAssetDownloadDelegate {
-    func urlSession(_ session: URLSession, assetDownloadTask: AVAssetDownloadTask,
-                    didFinishDownloadingTo location: URL) {
-        guard let dl = find(byTaskID: assetDownloadTask.taskIdentifier) else { return }
-
-        // Stage 1: move .movpkg to persistent storage
-        let destDir = Self.downloadDirectory
-        let safeName = "\(dl.media.title.prefix(40))_\(Int(Date().timeIntervalSince1970))"
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: " ", with: "_")
-        let movpkgDest = destDir.appendingPathComponent("\(safeName).movpkg")
-
-        do {
-            if FileManager.default.fileExists(atPath: movpkgDest.path) {
-                try FileManager.default.removeItem(at: movpkgDest)
-            }
-            try FileManager.default.moveItem(at: location, to: movpkgDest)
-        } catch {
-            // Fallback: use original temp location
-            dl.localURL = location
-            dl.state = .completed
-            dl.progress = 1.0
-            DispatchQueue.main.async { self.completedDownloads.insert(dl, at: 0) }
-            return
-        }
-
-        // Stage 2: export .movpkg → .mp4 (so it's playable & gallery-saveable)
-        dl.state = .converting
-        exportToMP4(from: movpkgDest, safeName: safeName, dl: dl)
-    }
-
-    // MARK: HLS → MP4 export
-    private func exportToMP4(from movpkgURL: URL, safeName: String, dl: MediaDownload) {
-        let asset = AVURLAsset(url: movpkgURL)
-        // Try low-overhead PassThrough first, then HighestQuality
-        let preset: String
-        let presets = AVAssetExportSession.exportPresets(compatibleWith: asset)
-        if presets.contains(AVAssetExportPresetPassthrough) {
-            preset = AVAssetExportPresetPassthrough
-        } else if presets.contains(AVAssetExportPresetHighestQuality) {
-            preset = AVAssetExportPresetHighestQuality
+// MARK: - URLSession Auth Challenge
+extension MediaDownloadManager {
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        // Accept all certificates for sideloaded app (no cert pinning in URLSession)
+        if let trust = challenge.protectionSpace.serverTrust {
+            completionHandler(.useCredential, URLCredential(trust: trust))
         } else {
-            preset = AVAssetExportPresetMediumQuality
+            completionHandler(.performDefaultHandling, nil)
         }
-        guard let exportSession = AVAssetExportSession(asset: asset, presetName: preset) else {
-            // AVAssetExportSession unavailable – keep .movpkg as-is
-            dl.localURL = movpkgURL
-            dl.hlsConversionStatus = "MP4 변환 불가 (movpkg로 저장)"
-            dl.state = .completed
-            dl.progress = 1.0
-            DispatchQueue.main.async { self.completedDownloads.insert(dl, at: 0) }
-            return
-        }
-
-        let mp4URL = Self.downloadDirectory.appendingPathComponent("\(safeName).mp4")
-        if FileManager.default.fileExists(atPath: mp4URL.path) {
-            try? FileManager.default.removeItem(at: mp4URL)
-        }
-
-        exportSession.outputURL = mp4URL
-        exportSession.outputFileType = .mp4
-        exportSession.shouldOptimizeForNetworkUse = true
-
-        exportSession.exportAsynchronously {
-            DispatchQueue.main.async {
-                if exportSession.status == .completed {
-                    try? FileManager.default.removeItem(at: movpkgURL)
-                    dl.localURL = mp4URL
-                    dl.hlsConversionStatus = "MP4 변환 완료"
-                } else {
-                    // PassThrough failed for this stream — keep .movpkg (AVPlayer can play it)
-                    dl.localURL = movpkgURL
-                    dl.hlsConversionStatus = "movpkg 저장됨"
-                }
-                dl.state = .completed
-                dl.progress = 1.0
-                // Move from active → completed list
-                self.downloads.removeAll { $0.id == dl.id }
-                self.completedDownloads.insert(dl, at: 0)
-                NotificationCenter.default.post(name: .downloadCompleted, object: dl.media.title)
-                if dl.saveToVault { Task { await self.moveToVault(dl) } }
-            }
-        }
-    }
-
-    func urlSession(_ session: URLSession, assetDownloadTask: AVAssetDownloadTask,
-                    didLoad timeRange: CMTimeRange,
-                    totalTimeRangesLoaded: [NSValue],
-                    timeRangeExpectedToLoad: CMTimeRange) {
-        guard let dl = find(byTaskID: assetDownloadTask.taskIdentifier) else { return }
-        let loaded = totalTimeRangesLoaded.reduce(0.0) {
-            $0 + CMTimeGetSeconds($1.timeRangeValue.duration)
-        }
-        let expected = CMTimeGetSeconds(timeRangeExpectedToLoad.duration)
-        dl.progress = expected > 0 ? loaded / expected : 0
     }
 }
 
