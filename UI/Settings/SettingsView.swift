@@ -12,7 +12,7 @@ struct SettingsView: View {
     @AppStorage("autoLockVault") private var autoLockVault = true
     @AppStorage("searchEngine") private var searchEngine = "DuckDuckGo"
     @AppStorage("autoSaveToGallery") private var autoSaveToGallery = true
-    @AppStorage("forceDarkWeb") private var forceDarkWeb = false
+    @AppStorage("appTheme") private var appTheme = "system"
     @State private var showClearAlert = false
 
     var body: some View {
@@ -42,7 +42,11 @@ struct SettingsView: View {
                         Text("DuckDuckGo").tag("DuckDuckGo"); Text("Brave Search").tag("Brave")
                         Text("Google").tag("Google"); Text("Naver").tag("Naver")
                     } label: { Label("검색 엔진", systemImage: "magnifyingglass") }
-                    Toggle(isOn: $forceDarkWeb) { Label("웹 다크 모드 (강제)", systemImage: "moon.fill") }
+                    Picker(selection: $appTheme) {
+                        Text("시스템 설정").tag("system")
+                        Text("라이트 모드").tag("light")
+                        Text("다크 모드").tag("dark")
+                    } label: { Label("테마", systemImage: "circle.lefthalf.filled") }
                 } header: { Text("검색 & 브라우저") }
 
                 Section {

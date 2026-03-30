@@ -162,7 +162,19 @@ struct DownloadsManagerView: View {
                         }
 
                         Button {
-                            Task { try? await vault.unlock(); try? await vault.store(fileURL: url, originalName: dl.media.title) }
+                            Task {
+                                do {
+                                    try await vault.unlock()
+                                    try await vault.store(fileURL: url, originalName: dl.media.title)
+                                    await MainActor.run {
+                                        NotificationCenter.default.post(name: .downloadCompleted, object: "🔒 보안 폴더에 저장 완료")
+                                    }
+                                } catch {
+                                    await MainActor.run {
+                                        NotificationCenter.default.post(name: .downloadFailed, object: "보안 폴더 저장 실패: \(error.localizedDescription)")
+                                    }
+                                }
+                            }
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: "lock.shield")
@@ -208,6 +220,21 @@ struct DownloadsManagerView: View {
                 }
                 .contextMenu {
                     Button { saveToGallery(url: url, type: detectType(url)) } label: { Label("갤러리 저장", systemImage: "photo.badge.arrow.down") }
+                    Button {
+                        Task {
+                            do {
+                                try await vault.unlock()
+                                try await vault.store(fileURL: url, originalName: url.lastPathComponent)
+                                await MainActor.run {
+                                    NotificationCenter.default.post(name: .downloadCompleted, object: "🔒 보안 폴더에 저장 완료")
+                                }
+                            } catch {
+                                await MainActor.run {
+                                    NotificationCenter.default.post(name: .downloadFailed, object: "보안 폴더 저장 실패")
+                                }
+                            }
+                        }
+                    } label: { Label("보안 폴더로 이동", systemImage: "lock.shield") }
                     ShareLink(item: url) { Label("공유", systemImage: "square.and.arrow.up") }
                     Button(role: .destructive) { try? FileManager.default.removeItem(at: url) } label: { Label("삭제", systemImage: "trash") }
                 }
