@@ -182,7 +182,8 @@ struct BrowserContainerView: View {
 
     private func snackbar(_ media: DetectedMedia) -> some View {
         Button {
-            downloadManager.download(media: media, saveToVault: false)
+            // ★ WKDownload 경로로 — URLSession 대신 브라우저 세션 사용
+            NotificationCenter.default.post(name: .wkDownloadRequested, object: media)
             withAnimation { showMediaSnackbar = false }
         } label: {
             HStack(spacing: 10) {

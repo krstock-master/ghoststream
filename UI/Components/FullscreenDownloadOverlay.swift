@@ -117,9 +117,8 @@ final class FullscreenDownloadOverlay {
     @objc private func tappedDownload() {
         guard let url = pendingURL else { hide(); return }
 
-        // ★ Post notification for WKWebView.startDownload (coordinator handles it)
-        // This ensures download uses browser's own session (cookies, auth)
-        NotificationCenter.default.post(name: .startImmediateDownload, object:
+        // ★ WKWebView.startDownload 경로로 — 브라우저 세션 사용 (삼성/알로하 동일)
+        NotificationCenter.default.post(name: .wkDownloadRequested, object:
             DetectedMedia(url: url, type: url.absoluteString.contains(".m3u8") ? .hls : .mp4,
                 quality: pendingQuality, title: pendingTitle,
                 referer: "", thumbnail: nil, estimatedSize: nil))

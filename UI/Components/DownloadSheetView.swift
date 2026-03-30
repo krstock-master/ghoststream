@@ -14,6 +14,9 @@ struct DownloadsManagerView: View {
     @State private var savedToGallery: Set<String> = []
     @State private var showVaultAuth = false
 
+    @State private var showURLInput = false
+    @State private var pasteURL = ""
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -35,11 +38,49 @@ struct DownloadsManagerView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("다운로드").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("닫기") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    // ★ 방법 3: URL 직접 입력 다운로드
+                    Button {
+                        // Auto-paste from clipboard
+                        if let clip = UIPasteboard.general.string,
+                           (clip.hasPrefix("http://") || clip.hasPrefix("https://")) {
+                            pasteURL = clip
+                        } else {
+                            pasteURL = ""
+                        }
+                        showURLInput = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.teal)
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) { Button("닫기") { dismiss() } }
+            }
             .sheet(isPresented: $showPlayer) {
                 if let url = playerURL {
                     VideoPlayerSheet(url: url, isPresented: $showPlayer)
                 }
+            }
+            .alert("URL 다운로드", isPresented: $showURLInput) {
+                TextField("영상 URL 붙여넣기", text: $pasteURL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("다운로드") {
+                    let trimmed = pasteURL.trimmingCharacters(in: .whitespaces)
+                    if let url = URL(string: trimmed),
+                       (url.scheme == "http" || url.scheme == "https") {
+                        // ★ WKDownload 경로로 요청
+                        let media = DetectedMedia(url: url, type: trimmed.contains(".m3u8") ? .hls : .mp4,
+                            quality: "URL", title: url.deletingPathExtension().lastPathComponent,
+                            referer: "", thumbnail: nil, estimatedSize: nil)
+                        NotificationCenter.default.post(name: .wkDownloadRequested, object: media)
+                    }
+                }
+                Button("취소", role: .cancel) {}
+            } message: {
+                Text("클립보드의 URL이 자동으로 붙여넣기됩니다")
             }
         }
     }

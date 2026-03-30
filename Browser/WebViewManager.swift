@@ -179,7 +179,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         if a.targetFrame == nil { w.load(a.request) }; return nil
     }
 
-    // MARK: - Context Menu (long-press)
+    // MARK: - Context Menu (long-press) — 방법 1: Long Tap 다운로드
     func webView(_ webView: WKWebView, contextMenuConfigurationFor elementInfo: WKContextMenuElementInfo) async -> UIContextMenuConfiguration? {
         guard let linkURL = elementInfo.linkURL else { return nil }
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
@@ -189,11 +189,12 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             })
             let ext = linkURL.pathExtension.lowercased()
             if ["mp4","m4v","mov","webm","gif","m3u8","png","jpg","jpeg","webp"].contains(ext) {
-                actions.append(UIAction(title: "다운로드", image: UIImage(systemName: "arrow.down.circle.fill")) { [weak self] _ in
-                    self?.emitMedia(url: linkURL, type: ext == "gif" ? .gif : .mp4, quality: "Direct")
+                // ★ WKDownload 사용 (브라우저 세션 그대로)
+                actions.append(UIAction(title: "비디오 다운로드", image: UIImage(systemName: "arrow.down.circle.fill")) { [weak self] _ in
+                    self?.startWKDownload(url: linkURL, title: linkURL.deletingPathExtension().lastPathComponent)
                 })
-                actions.append(UIAction(title: "사진 앱에 저장", image: UIImage(systemName: "photo.badge.arrow.down")) { _ in
-                    Self.saveURLToPhotos(linkURL)
+                actions.append(UIAction(title: "사진 앱에 저장", image: UIImage(systemName: "photo.badge.arrow.down")) { [weak self] _ in
+                    self?.startWKDownload(url: linkURL, title: linkURL.deletingPathExtension().lastPathComponent)
                 })
             }
             actions.append(UIAction(title: "링크 복사", image: UIImage(systemName: "doc.on.doc")) { _ in
@@ -637,7 +638,8 @@ enum WebViewConfigurator {
     },true);
     // ★ webkitendfullscreen REMOVED — this fires when iOS system player takes over,
     // causing the overlay to hide after 1 second. Overlay now only hides via X button.
-    // CSS Fullscreen API
+    // CSS Fullscreen API — show overlay but NEVER auto-hide
+    // (iOS native fullscreen causes CSS fullscreen exit → must not hide overlay)
     function onFSChange(){
         var el=document.fullscreenElement||document.webkitFullscreenElement;
         if(el){
@@ -648,9 +650,11 @@ enum WebViewConfigurator {
                     try{window.webkit.messageHandlers.alohaDownload.postMessage({url:src,title:document.title,quality:(v.videoHeight||'Auto')+'p',fullscreen:true});}catch(x){}
                 }
             }
-        }else{
-            try{window.webkit.messageHandlers.alohaDownload.postMessage({url:'__hide_overlay__',title:'',quality:'',fullscreen:false});}catch(x){}
         }
+        // ★ 전체화면 종료 시 __hide_overlay__ 보내지 않음
+        // iOS 네이티브 전체화면 전환 시 CSS fullscreen이 해제되면서
+        // 오버레이가 1초 만에 사라지는 버그의 원인이었음
+        // 사용자가 직접 X 버튼을 눌러야만 오버레이 숨김
     }
     document.addEventListener('fullscreenchange',onFSChange);
     document.addEventListener('webkitfullscreenchange',onFSChange);
