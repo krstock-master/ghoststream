@@ -168,11 +168,8 @@ struct DownloadsManagerView: View {
                                     try await vault.store(fileURL: url, originalName: dl.media.title)
                                     // ★ 보안폴더 저장 후 원본 파일 삭제
                                     try? FileManager.default.removeItem(at: url)
-                                    // ★ 갤러리(PHAsset)에서도 삭제
+                                    // ★ 갤러리(PHAsset)에서도 삭제 (권한 요청 포함, 자체 토스트 발송)
                                     await Self.deleteFromPhotoLibrary(filename: url.lastPathComponent)
-                                    await MainActor.run {
-                                        NotificationCenter.default.post(name: .downloadCompleted, object: "🔒 보안 폴더에 저장 + 원본 삭제 완료")
-                                    }
                                 } catch {
                                     await MainActor.run {
                                         NotificationCenter.default.post(name: .downloadFailed, object: "보안 폴더 저장 실패: \(error.localizedDescription)")
@@ -229,13 +226,8 @@ struct DownloadsManagerView: View {
                             do {
                                 try await vault.unlock()
                                 try await vault.store(fileURL: url, originalName: url.lastPathComponent)
-                                // ★ 보안폴더 저장 후 원본 파일 삭제
                                 try? FileManager.default.removeItem(at: url)
-                                // ★ 갤러리(PHAsset)에서도 삭제
                                 await Self.deleteFromPhotoLibrary(filename: url.lastPathComponent)
-                                await MainActor.run {
-                                    NotificationCenter.default.post(name: .downloadCompleted, object: "🔒 보안 폴더에 이동 + 원본 삭제 완료")
-                                }
                             } catch {
                                 await MainActor.run {
                                     NotificationCenter.default.post(name: .downloadFailed, object: "보안 폴더 저장 실패")
@@ -273,24 +265,94 @@ struct DownloadsManagerView: View {
                 emptyState("보안 폴더 비어있음", icon: "lock.shield", desc: "다운로드 완료 후 '보안 폴더' 버튼으로 파일을 암호화 저장하세요")
             } else {
                 ForEach(vault.items) { item in
-                    Button {
-                        Task {
-                            if let url = try? await vault.decrypt(item: item) {
-                                await MainActor.run { playerURL = url; showPlayer = true }
+                    VStack(spacing: 0) {
+                        Button {
+                            Task {
+                                if let url = try? await vault.decrypt(item: item) {
+                                    await MainActor.run { playerURL = url; showPlayer = true }
+                                }
                             }
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "lock.fill").foregroundStyle(.purple).frame(width: 28)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.originalName).font(.subheadline).lineLimit(1).foregroundStyle(.primary)
+                                    HStack(spacing: 6) {
+                                        Text(item.formattedSize).font(.caption).foregroundStyle(.secondary)
+                                        Text("·").foregroundStyle(.secondary)
+                                        Text(item.formattedDate).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                Image(systemName: "play.circle").foregroundStyle(.purple)
+                            }
+                            .padding(12)
                         }
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "lock.fill").foregroundStyle(.purple).frame(width: 28)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.originalName).font(.subheadline).lineLimit(1).foregroundStyle(.primary)
-                                Text(item.formattedSize).font(.caption).foregroundStyle(.secondary)
+
+                        // ★ 보안폴더 액션 버튼 (눈에 보이게)
+                        HStack(spacing: 10) {
+                            // 갤러리로 내보내기
+                            Button {
+                                Task {
+                                    do {
+                                        let url = try await vault.decrypt(item: item)
+                                        await Self.exportVaultItemToGallery(url: url, item: item)
+                                    } catch {
+                                        await MainActor.run {
+                                            NotificationCenter.default.post(name: .downloadFailed, object: "복호화 실패")
+                                        }
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "photo.badge.arrow.down")
+                                    Text("갤러리로")
+                                }.font(.caption).foregroundStyle(.teal)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(Color(.tertiarySystemFill)).clipShape(Capsule())
                             }
+
+                            // 공유
+                            Button {
+                                Task {
+                                    if let url = try? await vault.decrypt(item: item) {
+                                        await MainActor.run {
+                                            if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                                               let root = scene.windows.first?.rootViewController {
+                                                root.present(UIActivityViewController(activityItems: [url], applicationActivities: nil), animated: true)
+                                            }
+                                        }
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "square.and.arrow.up")
+                                    Text("공유")
+                                }.font(.caption).foregroundStyle(.teal)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(Color(.tertiarySystemFill)).clipShape(Capsule())
+                            }
+
                             Spacer()
-                            Image(systemName: "play.circle").foregroundStyle(.purple)
+
+                            // 삭제
+                            Button(role: .destructive) {
+                                Task {
+                                    try? await vault.delete(item: item)
+                                    await MainActor.run {
+                                        NotificationCenter.default.post(name: .downloadCompleted, object: "보안 폴더에서 삭제됨")
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "trash").font(.caption).foregroundStyle(.red)
+                                    .padding(.horizontal, 10).padding(.vertical, 6)
+                                    .background(Color(.tertiarySystemFill)).clipShape(Capsule())
+                            }
                         }
-                        .padding(12).background(Color(.secondarySystemGroupedBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
+                        .padding(.horizontal, 12).padding(.bottom, 10)
                     }
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
             }
         }
@@ -463,29 +525,114 @@ struct DownloadsManagerView: View {
     }
 
     // ★ 보안폴더 이동 시 갤러리에서 해당 파일 삭제
+    // ★ FIX: 파일명 매칭 → 날짜+미디어타입 매칭 (iOS가 갤러리 저장 시 파일명 변경하므로)
     static func deleteFromPhotoLibrary(filename: String) async {
-        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        guard status == .authorized || status == .limited else { return }
+        // readWrite 권한 필요 (addOnly로는 삭제 불가)
+        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        guard status == .authorized || status == .limited else {
+            await MainActor.run {
+                NotificationCenter.default.post(name: .downloadFailed,
+                    object: "갤러리 삭제를 위해 '모든 사진 접근' 권한이 필요합니다.\n설정 → GhostStream → 사진 → '전체 접근 허용'")
+            }
+            return
+        }
 
+        let ext = (filename as NSString).pathExtension.lowercased()
+        let isVideo = ["mp4", "m4v", "mov", "webm"].contains(ext)
+
+        // 최근 10분 내 추가된 에셋 중 미디어 타입 일치하는 것 검색
         let fetchOptions = PHFetchOptions()
+        let tenMinutesAgo = Date().addingTimeInterval(-600)
+        fetchOptions.predicate = NSPredicate(format: "creationDate > %@", tenMinutesAgo as NSDate)
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        fetchOptions.fetchLimit = 20 // 최근 20개만 검색
+        fetchOptions.fetchLimit = 10
 
-        let assets = PHAsset.fetchAssets(with: fetchOptions)
+        let mediaType: PHAssetMediaType = isVideo ? .video : .image
+        let assets = PHAsset.fetchAssets(with: mediaType, options: fetchOptions)
+
+        // 추가로 파일명 매칭 시도 (성공하면 정확한 에셋 삭제)
         var toDelete: [PHAsset] = []
+        let normalizedName = filename.lowercased()
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+        let nameWithoutExt = (filename as NSString).deletingPathExtension.lowercased()
+
         assets.enumerateObjects { asset, _, _ in
             let resources = PHAssetResource.assetResources(for: asset)
+            var matched = false
             for r in resources {
-                if r.originalFilename == filename || r.originalFilename.contains(filename.replacingOccurrences(of: " ", with: "_")) {
-                    toDelete.append(asset)
-                    return
+                let origName = r.originalFilename.lowercased()
+                    .replacingOccurrences(of: " ", with: "_")
+                    .replacingOccurrences(of: ":", with: "_")
+                if origName == normalizedName || origName.contains(nameWithoutExt) {
+                    matched = true
+                    break
                 }
+            }
+            if matched { toDelete.append(asset) }
+        }
+
+        // 파일명 매칭 실패 → 가장 최근 에셋 사용 (방금 다운로드한 것)
+        if toDelete.isEmpty && assets.count > 0 {
+            if let latest = assets.firstObject {
+                toDelete.append(latest)
             }
         }
 
-        guard !toDelete.isEmpty else { return }
-        try? await PHPhotoLibrary.shared().performChanges {
-            PHAssetChangeRequest.deleteAssets(toDelete as NSFastEnumeration)
+        guard !toDelete.isEmpty else {
+            await MainActor.run {
+                NotificationCenter.default.post(name: .downloadCompleted,
+                    object: "🔒 보안 폴더 저장 완료 (갤러리에서 일치 파일 미발견)")
+            }
+            return
+        }
+
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.deleteAssets(toDelete as NSFastEnumeration)
+            }
+            await MainActor.run {
+                NotificationCenter.default.post(name: .downloadCompleted,
+                    object: "🔒 보안 폴더 저장 + 갤러리에서 \(toDelete.count)개 삭제 완료")
+            }
+        } catch {
+            await MainActor.run {
+                NotificationCenter.default.post(name: .downloadFailed,
+                    object: "갤러리 삭제 실패: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // ★ 보안폴더 → 갤러리 내보내기
+    static func exportVaultItemToGallery(url: URL, item: VaultItem) async {
+        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard status == .authorized || status == .limited else {
+            await MainActor.run {
+                NotificationCenter.default.post(name: .downloadFailed, object: "사진 앱 접근 권한이 필요합니다")
+            }
+            return
+        }
+
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                let req = PHAssetCreationRequest.forAsset()
+                let ext = (item.originalName as NSString).pathExtension.lowercased()
+                let isVideo = ["mp4", "m4v", "mov", "webm"].contains(ext)
+                if isVideo {
+                    req.addResource(with: .video, fileURL: url, options: nil)
+                } else if let data = try? Data(contentsOf: url) {
+                    req.addResource(with: .photo, data: data, options: nil)
+                }
+            }
+            await MainActor.run {
+                NotificationCenter.default.post(name: .downloadCompleted,
+                    object: "📸 갤러리에 내보내기 완료: \(item.originalName)")
+            }
+        } catch {
+            await MainActor.run {
+                NotificationCenter.default.post(name: .downloadFailed,
+                    object: "갤러리 내보내기 실패: \(error.localizedDescription)")
+            }
         }
     }
 }
