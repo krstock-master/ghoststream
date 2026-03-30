@@ -22,16 +22,18 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
         self.vaultManager = vaultManager
         super.init()
 
-        // Standard download session
-        let config = URLSessionConfiguration.background(withIdentifier: "com.ghoststream.media.bg")
-        config.isDiscretionary = false
-        config.sessionSendsLaunchEvents = true
+        // Foreground session — sideloaded apps cannot use background sessions
+        // (background entitlements are stripped by Sideloadly/TrollStore)
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 600
+        config.waitsForConnectivity = true
         urlSession = URLSession(configuration: config, delegate: self, delegateQueue: .main)
 
-        // HLS download session
-        let hlsConfig = URLSessionConfiguration.background(withIdentifier: "com.ghoststream.hls.bg")
+        // HLS session — also foreground
+        let hlsConfig = URLSessionConfiguration.background(withIdentifier: "com.ghoststream.hls.\(Int(Date().timeIntervalSince1970))")
         hlsConfig.isDiscretionary = false
-        hlsConfig.sessionSendsLaunchEvents = true
+        hlsConfig.sessionSendsLaunchEvents = false
         hlsSession = AVAssetDownloadURLSession(
             configuration: hlsConfig,
             assetDownloadDelegate: self,

@@ -258,59 +258,52 @@ struct DownloadsManagerView: View {
 
     private func saveToGallery(url: URL, type: DetectedMedia.MediaType) {
         let ext = url.pathExtension.lowercased()
-        let isVideoType = [DetectedMedia.MediaType.mp4, .hls, .blob, .webm].contains(type)
-            || ["mp4","m4v","mov","webm","movpkg"].contains(ext)
-        let isImage = ["jpg","jpeg","png","gif","webp","heic"].contains(ext)
+        let isVideoFile = ["mp4","m4v","mov","webm"].contains(ext)
+        let isImageFile = ["jpg","jpeg","png","webp","heic","gif"].contains(ext)
 
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+        // Step 1: if .movpkg, export to .mp4 first, then recursively save
+        if ext == "movpkg" {
+            exportMovpkgThenSave(movpkgURL: url, type: type)
+            return
+        }
+
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { [self] status in
             guard status == .authorized || status == .limited else { return }
 
-            if ext == "movpkg" {
-                // PHPhotoLibrary cannot save .movpkg — must export to .mp4 first
-                let asset = AVURLAsset(url: url)
-                // Use PassThrough if available (no re-encode), else HighestQuality
-                let preset: String
-                let supported = AVAssetExportSession.exportPresets(compatibleWith: asset)
-                if supported.contains(AVAssetExportPresetPassthrough) {
-                    preset = AVAssetExportPresetPassthrough
-                } else {
-                    preset = AVAssetExportPresetHighestQuality
-                }
-                guard let exp = AVAssetExportSession(asset: asset, presetName: preset) else { return }
-                let dest = url.deletingPathExtension().appendingPathExtension("mp4")
-                if FileManager.default.fileExists(atPath: dest.path) {
-                    try? FileManager.default.removeItem(at: dest)
-                }
-                exp.outputURL = dest
-                exp.outputFileType = .mp4
-                exp.shouldOptimizeForNetworkUse = true
-                exp.exportAsynchronously {
-                    guard exp.status == .completed else {
-                        print("GS export failed: \(exp.error?.localizedDescription ?? "unknown")")
-                        return
-                    }
+            if isVideoFile {
+                // UISaveVideoAtPathToSavedPhotosAlbum — most reliable for sideloaded apps
+                UISaveVideoAtPathToSavedPhotosAlbum(url.path, nil, nil, nil)
+            } else if isImageFile {
+                if let image = UIImage(contentsOfFile: url.path) {
+                    UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+                } else if ext == "gif",
+                          let data = try? Data(contentsOf: url) {
+                    // GIF via PHPhotoLibrary to preserve animation
                     PHPhotoLibrary.shared().performChanges {
-                        PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: dest)
+                        let req = PHAssetCreationRequest.forAsset()
+                        req.addResource(with: .photo, data: data, options: nil)
                     }
-                }
-            } else if isImage && ext == "gif" {
-                // GIF: save as data to preserve animation
-                guard let data = try? Data(contentsOf: url) else { return }
-                PHPhotoLibrary.shared().performChanges {
-                    let req = PHAssetCreationRequest.forAsset()
-                    req.addResource(with: .photo, data: data, options: nil)
-                }
-            } else if isVideoType {
-                // MP4/MOV/M4V — direct video creation
-                PHPhotoLibrary.shared().performChanges {
-                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
-                }
-            } else {
-                // Images (PNG, JPG, HEIC, WEBP)
-                PHPhotoLibrary.shared().performChanges {
-                    PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
                 }
             }
+        }
+    }
+
+    private func exportMovpkgThenSave(movpkgURL: URL, type: DetectedMedia.MediaType) {
+        let asset = AVURLAsset(url: movpkgURL)
+        let supported = AVAssetExportSession.exportPresets(compatibleWith: asset)
+        let preset = supported.contains(AVAssetExportPresetPassthrough)
+            ? AVAssetExportPresetPassthrough : AVAssetExportPresetHighestQuality
+        guard let exp = AVAssetExportSession(asset: asset, presetName: preset) else { return }
+        let dest = movpkgURL.deletingPathExtension().appendingPathExtension("mp4")
+        if FileManager.default.fileExists(atPath: dest.path) {
+            try? FileManager.default.removeItem(at: dest)
+        }
+        exp.outputURL = dest
+        exp.outputFileType = .mp4
+        exp.shouldOptimizeForNetworkUse = true
+        exp.exportAsynchronously { [weak self] in
+            guard exp.status == .completed else { return }
+            self?.saveToGallery(url: dest, type: .mp4)
         }
     }
 
@@ -339,32 +332,50 @@ struct VideoPlayerSheet: View {
     let url: URL
     @Binding var isPresented: Bool
     @State private var player: AVPlayer?
+    @State private var isReady = false
+    @State private var errorMsg: String?
 
     var body: some View {
-        ZStack(alignment: .top) {
+        ZStack {
             Color.black.ignoresSafeArea()
-            if let player {
-                VideoPlayer(player: player).ignoresSafeArea()
-            }
-            HStack {
-                Button {
-                    player?.pause()
-                    isPresented = false
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 30))
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.5), radius: 4)
+
+            if let player, isReady {
+                VideoPlayer(player: player)
+                    .ignoresSafeArea()
+            } else if let err = errorMsg {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 36)).foregroundStyle(.orange)
+                    Text("재생 실패").font(.headline).foregroundStyle(.white)
+                    Text(err).font(.caption).foregroundStyle(.gray)
+                        .multilineTextAlignment(.center).padding(.horizontal, 24)
+                    Button("닫기") { isPresented = false }
+                        .foregroundStyle(.teal)
                 }
-                .padding(.leading, 16)
-                .padding(.top, 52)
+            } else {
+                ProgressView().scaleEffect(1.5).tint(.white)
+            }
+
+            // Close button — always on top
+            VStack {
+                HStack {
+                    Button {
+                        player?.pause()
+                        isPresented = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.6), radius: 6)
+                    }
+                    .padding(.leading, 16)
+                    .padding(.top, 52)
+                    Spacer()
+                }
                 Spacer()
             }
         }
-        .onAppear {
-            player = AVPlayer(url: url)
-            player?.play()
-        }
+        .onAppear { Task { await loadPlayer() } }
         .onDisappear { player?.pause() }
         .gesture(
             DragGesture(minimumDistance: 60, coordinateSpace: .local)
@@ -375,5 +386,44 @@ struct VideoPlayerSheet: View {
                     }
                 }
         )
+        .interactiveDismissDisabled(false)
+    }
+
+    @MainActor
+    private func loadPlayer() async {
+        let ext = url.pathExtension.lowercased()
+        let asset: AVURLAsset
+
+        if ext == "movpkg" || ext == "m3u8" {
+            // These need AVURLAsset with proper loading
+            asset = AVURLAsset(url: url)
+        } else {
+            // MP4/MOV/GIF — direct
+            asset = AVURLAsset(url: url)
+        }
+
+        // Check file exists
+        if !["http","https"].contains(url.scheme ?? "") {
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                errorMsg = "파일을 찾을 수 없습니다\n\(url.lastPathComponent)"
+                return
+            }
+        }
+
+        do {
+            // Load playable tracks
+            let tracks = try await asset.loadTracks(withMediaType: .video)
+            if tracks.isEmpty {
+                errorMsg = "재생 가능한 트랙 없음\n포맷: \(ext)"
+                return
+            }
+            let item = AVPlayerItem(asset: asset)
+            let p = AVPlayer(playerItem: item)
+            player = p
+            isReady = true
+            p.play()
+        } catch {
+            errorMsg = error.localizedDescription
+        }
     }
 }
