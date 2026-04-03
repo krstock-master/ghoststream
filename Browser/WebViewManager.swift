@@ -8,7 +8,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     let tab: Tab
     let privacyEngine: PrivacyEngine
     let onMediaDetected: (DetectedMedia) -> Void
-    private var pendingDownloadFilenames: [WKDownload: String] = [] // ★ per-download filename tracking
+    private var pendingDownloadFilenames: [WKDownload: String] = [:] // ★ per-download filename tracking
 
     var downloadManager: MediaDownloadManager?
     var bookmarkManager: BookmarkManager?
