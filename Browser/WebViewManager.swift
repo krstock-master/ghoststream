@@ -8,7 +8,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     let tab: Tab
     let privacyEngine: PrivacyEngine
     let onMediaDetected: (DetectedMedia) -> Void
-    private var pendingDownloadFilename: String?
+    private var pendingDownloadFilenames: [WKDownload: String] = [] // ★ per-download filename tracking
 
     var downloadManager: MediaDownloadManager?
     var bookmarkManager: BookmarkManager?
@@ -200,7 +200,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         }
         filename = filename.replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: ":", with: "_")
-        pendingDownloadFilename = filename
+        pendingDownloadFilenames[download] = filename
 
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Downloads", isDirectory: true)
@@ -211,10 +211,11 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     }
 
     func downloadDidFinish(_ download: WKDownload) {
-        let title = activeWKDownloads.removeValue(forKey: download) ?? pendingDownloadFilename ?? "파일"
+        let title = activeWKDownloads.removeValue(forKey: download) ?? pendingDownloadFilenames[download] ?? "파일"
+        let fname = pendingDownloadFilenames.removeValue(forKey: download)
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Downloads", isDirectory: true)
-        if let fname = pendingDownloadFilename {
+        if let fname = fname {
             let filePath = dir.appendingPathComponent(fname)
             let size = (try? FileManager.default.attributesOfItem(atPath: filePath.path)[.size] as? Int) ?? 0
             let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
