@@ -45,12 +45,12 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         w.takeSnapshot(with: config) { [weak self] image, _ in
             DispatchQueue.main.async { self?.tab.thumbnail = image }
         }
-        // Reapply element hider rules
+        // Reapply element hider rules (host+path 기반)
         if let host = w.url?.host {
-            let rules = ElementHiderStore.shared.rules(for: host)
+            let rules = ElementHiderStore.shared.rules(for: host, path: w.url?.path)
             if !rules.isEmpty {
-                let css = rules.joined(separator: ",") + "{display:none!important}"
-                w.evaluateJavaScript("var s=document.createElement('style');s.textContent='\(css)';document.head.appendChild(s);")
+                let escapedCSS = rules.joined(separator: ",").replacingOccurrences(of: "'", with: "\\'")
+                w.evaluateJavaScript("var s=document.createElement('style');s.textContent='\(escapedCSS){display:none!important}';document.head.appendChild(s);")
             }
         }
 
@@ -387,7 +387,9 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 estimatedSize: ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))
             tab.detectedMedia.append(media); onMediaDetected(media)
         case "elementHidden":
-            if let sel = dict["selector"] as? String, let host = tab.url?.host { ElementHiderStore.shared.addRule(sel, for: host) }
+            if let sel = dict["selector"] as? String, let host = tab.url?.host {
+                ElementHiderStore.shared.addRule(sel, for: host, path: tab.url?.path)
+            }
         case "privacyEvent":
             if let ev = dict["event"] as? String {
                 switch ev {
@@ -498,17 +500,47 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
 // MARK: - Element Hider Store
 final class ElementHiderStore {
     static let shared = ElementHiderStore()
-    private var store: [String: [String]] = [:]
+    private var store: [String: [String]] = [:] // host+path → selectors
+
     init() {
         if let d = UserDefaults.standard.data(forKey: "elementHiderRules"),
            let s = try? JSONDecoder().decode([String:[String]].self, from: d) { store = s }
     }
-    func addRule(_ sel: String, for host: String) {
-        var r = store[host] ?? []; if !r.contains(sel) { r.append(sel); store[host] = r; save() }
+
+    /// 키 생성: 정확한 페이지에만 적용 (host + path)
+    private func key(for host: String, path: String? = nil) -> String {
+        if let path = path, !path.isEmpty, path != "/" {
+            return "\(host)\(path)"
+        }
+        return host
     }
-    func rules(for host: String) -> [String] { store[host] ?? [] }
-    func clearRules(for host: String) { store.removeValue(forKey: host); save() }
-    private func save() { if let d = try? JSONEncoder().encode(store) { UserDefaults.standard.set(d, forKey: "elementHiderRules") } }
+
+    func addRule(_ sel: String, for host: String, path: String? = nil) {
+        let k = key(for: host, path: path)
+        var r = store[k] ?? []
+        if !r.contains(sel) { r.append(sel); store[k] = r; save() }
+    }
+
+    func rules(for host: String, path: String? = nil) -> [String] {
+        // 정확한 host+path 매칭 + host 전체 매칭 합산
+        let exactKey = key(for: host, path: path)
+        let hostRules = store[host] ?? []
+        let exactRules = (exactKey != host) ? (store[exactKey] ?? []) : []
+        return Array(Set(hostRules + exactRules))
+    }
+
+    func clearRules(for host: String) {
+        // host 관련 모든 룰 삭제
+        let keysToRemove = store.keys.filter { $0 == host || $0.hasPrefix(host + "/") }
+        for k in keysToRemove { store.removeValue(forKey: k) }
+        save()
+    }
+
+    private func save() {
+        if let d = try? JSONEncoder().encode(store) {
+            UserDefaults.standard.set(d, forKey: "elementHiderRules")
+        }
+    }
 }
 
 // MARK: - WebView Configuration

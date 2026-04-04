@@ -139,19 +139,25 @@ struct DownloadsManagerView: View {
                 }
                 // Action buttons
                 if let url = dl.localURL {
+                    // ★ F3 FIX: 영상/이미지는 downloadDidFinish에서 자동 갤러리 저장됨
+                    let ext = url.pathExtension.lowercased()
+                    let autoSaved = ["mp4","m4v","mov","webm","jpg","jpeg","png","webp","heic","gif"].contains(ext)
+
                     HStack(spacing: 10) {
                         Button {
-                            saveToGallery(url: url, type: dl.media.type)
+                            if !autoSaved {
+                                saveToGallery(url: url, type: dl.media.type)
+                            }
                             savedToGallery.insert(dl.id.uuidString)
                         } label: {
                             HStack(spacing: 4) {
-                                Image(systemName: savedToGallery.contains(dl.id.uuidString) ? "checkmark" : "photo.badge.arrow.down")
-                                Text(savedToGallery.contains(dl.id.uuidString) ? "저장됨" : "갤러리 저장")
-                            }.font(.caption).foregroundStyle(savedToGallery.contains(dl.id.uuidString) ? .green : .teal)
+                                Image(systemName: (autoSaved || savedToGallery.contains(dl.id.uuidString)) ? "checkmark" : "photo.badge.arrow.down")
+                                Text((autoSaved || savedToGallery.contains(dl.id.uuidString)) ? "저장됨" : "갤러리 저장")
+                            }.font(.caption).foregroundStyle((autoSaved || savedToGallery.contains(dl.id.uuidString)) ? .green : .teal)
                             .padding(.horizontal, 10).padding(.vertical, 6)
                             .background(Color(.tertiarySystemFill)).clipShape(Capsule())
                         }
-                        .disabled(savedToGallery.contains(dl.id.uuidString))
+                        .disabled(autoSaved || savedToGallery.contains(dl.id.uuidString))
 
                         ShareLink(item: url) {
                             HStack(spacing: 4) {
@@ -696,9 +702,16 @@ struct VideoPlayerSheet: View {
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         }
-        .onAppear { Task { await loadPlayer() } }
-        .onDisappear { player?.pause(); player = nil }
+        .onAppear {
+            // ★ F4 FIX: 영상 재생 중 브라우저 뒤로가기 방지
+            Task { await loadPlayer() }
+        }
+        .onDisappear {
+            player?.pause()
+            player = nil
+        }
         .interactiveDismissDisabled(false)
+        .presentationDragIndicator(.visible)
     }
 
     private func cleanupAndDismiss() {

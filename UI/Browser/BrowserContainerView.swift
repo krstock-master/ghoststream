@@ -217,7 +217,8 @@ struct BrowserContainerView: View {
                 Button {
                 withAnimation(.easeInOut(duration: 0.25)) {
                     isAddressEditing = true
-                    addressText = tabManager.activeTab?.url?.absoluteString ?? ""
+                    // ★ F7 FIX: 주소창 탭 시 비움 → 바로 검색/입력 가능
+                    addressText = ""
                 }
             } label: {
                 HStack(spacing: 8) {
