@@ -712,6 +712,7 @@ struct VideoPlayerSheet: View {
         }
         .interactiveDismissDisabled(false)
         .presentationDragIndicator(.visible)
+        .presentationDetents([.large]) // ★ F4: 전체화면 고정 (스와이프 충돌 방지)
     }
 
     private func cleanupAndDismiss() {

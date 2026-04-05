@@ -324,7 +324,8 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
                 segReq.setValue(cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; "), forHTTPHeaderField: "Cookie")
             }
 
-            let (segData, _) = try await urlSession!.data(for: segReq)
+            guard let session = urlSession else { throw URLError(.cancelled) }
+            let (segData, _) = try await session.data(for: segReq)
             let segFile = tempDir.appendingPathComponent(String(format: "seg_%05d.ts", index))
             try segData.write(to: segFile)
             downloadedFiles.append(segFile)
