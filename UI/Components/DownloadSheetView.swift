@@ -22,10 +22,19 @@ struct DownloadsManagerView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 Picker("", selection: $selectedTab) {
-                    Text("다운로드 (\(dm.downloads.count + dm.completedDownloads.count))").tag(0)
-                    Text("파일").tag(1)
-                    Text("보안 폴더").tag(2)
-                }.pickerStyle(.segmented).padding()
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down.circle")
+                        Text("다운로드")
+                    }.tag(0)
+                    HStack(spacing: 4) {
+                        Image(systemName: "folder")
+                        Text("파일")
+                    }.tag(1)
+                    HStack(spacing: 4) {
+                        Image(systemName: "lock.shield")
+                        Text("보안 폴더")
+                    }.tag(2)
+                }.pickerStyle(.segmented).padding(.horizontal).padding(.top, 12)
 
                 ScrollView {
                     LazyVStack(spacing: 8) {
@@ -89,7 +98,14 @@ struct DownloadsManagerView: View {
     // MARK: - Downloads Tab (Active + Completed)
     @ViewBuilder
     private var downloadsTab: some View {
-        // Active downloads
+        // Active downloads section
+        if !dm.downloads.isEmpty {
+            HStack {
+                Text("진행 중").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(dm.downloads.count)개").font(.system(size: 12)).foregroundStyle(.secondary)
+            }.padding(.top, 8)
+        }
         ForEach(dm.downloads) { dl in
             VStack(spacing: 8) {
                 HStack {
@@ -113,7 +129,14 @@ struct DownloadsManagerView: View {
             .padding(12).background(Color(.secondarySystemGroupedBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
         }
 
-        // Completed downloads
+        // Completed downloads section
+        if !dm.completedDownloads.isEmpty {
+            HStack {
+                Text("완료").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(dm.completedDownloads.count)개").font(.system(size: 12)).foregroundStyle(.secondary)
+            }.padding(.top, 12)
+        }
         ForEach(dm.completedDownloads) { dl in
             VStack(spacing: 8) {
                 HStack(spacing: 12) {
