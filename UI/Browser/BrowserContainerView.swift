@@ -356,141 +356,103 @@ struct BrowserContainerView: View {
             }
             .padding(.horizontal, 14).padding(.top, 8)
             } // end isToolbarCompact
-            // 5-button bar: ← → ⬇️ □ ⋯
+            // ★ Safari-style bottom toolbar
             HStack(spacing: 0) {
-                // ★ Fix 6: 뒤로가기 — disabled 대신 opacity로 처리 (터치 영역 유지)
-                Button {
-                    webViewRef?.goBack()
-                } label: {
-                    Image(systemName: "chevron.left").font(.system(size: 18, weight: .medium))
+                Button { webViewRef?.goBack() } label: {
+                    Image(systemName: "chevron.left").font(.system(size: 20, weight: .regular))
                         .foregroundStyle(tabManager.activeTab?.canGoBack == true ? Color.primary : Color.primary.opacity(0.2))
-                        .frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
+                        .frame(maxWidth: .infinity).frame(height: 50).contentShape(Rectangle())
                 }
-
-                // 앞으로가기
-                Button {
-                    webViewRef?.goForward()
-                } label: {
-                    Image(systemName: "chevron.right").font(.system(size: 18, weight: .medium))
+                Button { webViewRef?.goForward() } label: {
+                    Image(systemName: "chevron.right").font(.system(size: 20, weight: .regular))
                         .foregroundStyle(tabManager.activeTab?.canGoForward == true ? Color.primary : Color.primary.opacity(0.2))
-                        .frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
+                        .frame(maxWidth: .infinity).frame(height: 50).contentShape(Rectangle())
                 }
-
-                // ★ Fix 4: 다운로드 버튼 (FAB 대체 → 하단 바에 배지)
+                // 공유
+                Button {
+                    if let url = tabManager.activeTab?.url,
+                       let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                       let root = scene.windows.first?.rootViewController {
+                        root.present(UIActivityViewController(activityItems: [url], applicationActivities: nil), animated: true)
+                    }
+                } label: {
+                    Image(systemName: "square.and.arrow.up").font(.system(size: 20, weight: .regular))
+                        .frame(maxWidth: .infinity).frame(height: 50).contentShape(Rectangle())
+                }
+                // 다운로드
                 Button { showDownloads = true } label: {
                     ZStack(alignment: .topTrailing) {
-                        Image(systemName: "arrow.down.circle").font(.system(size: 18, weight: .medium))
-                            .frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
-                        if downloadManager.downloads.count + downloadManager.completedDownloads.count > 0 {
-                            Text("\(downloadManager.downloads.count + downloadManager.completedDownloads.count)")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.white)
+                        Image(systemName: "arrow.down.to.line").font(.system(size: 20, weight: .regular))
+                            .frame(maxWidth: .infinity).frame(height: 50).contentShape(Rectangle())
+                        let cnt = downloadManager.downloads.count + downloadManager.completedDownloads.count
+                        if cnt > 0 {
+                            Text("\(cnt)").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
                                 .frame(minWidth: 16, minHeight: 16)
-                                .background(.red, in: Circle())
-                                .offset(x: -10, y: 8)
+                                .background(.teal, in: Circle()).offset(x: -8, y: 10)
                         }
                     }
                 }
-
                 // 탭
                 Button { showTabGrid = true } label: {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 5.5).stroke(Color.primary.opacity(0.55), lineWidth: 1.5).frame(width: 22, height: 22)
-                        Text("\(tabManager.tabs.count)").font(.system(size: 12, weight: .semibold, design: .rounded))
-                    }.frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
+                        RoundedRectangle(cornerRadius: 5).stroke(Color.primary.opacity(0.6), lineWidth: 1.5)
+                            .frame(width: 22, height: 22)
+                        Text("\(tabManager.tabs.count)")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    }.frame(maxWidth: .infinity).frame(height: 50).contentShape(Rectangle())
                 }
-
-                // 메뉴 (⋯)
-                Menu {
-                    Section("탭") {
-                        Button { tabManager.newTab() } label: { Label("새 탭", systemImage: "plus.square") }
-                        Button { tabManager.newTab(isPrivate: true) } label: { Label("프라이빗 탭", systemImage: "lock.square") }
+            }
+            // ★ 도구 가로 스크롤
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 14) {
+                    toolButton("새 탭", "plus.square") { tabManager.newTab() }
+                    toolButton("프라이빗", "lock.square") { tabManager.newTab(isPrivate: true) }
+                    toolButton("새로고침", "arrow.clockwise") { webViewRef?.reload() }
+                    toolButton(isDesktopMode ? "모바일" : "데스크톱", isDesktopMode ? "iphone" : "desktopcomputer") {
+                        isDesktopMode.toggle()
+                        DeviceProfileManager.shared.setDesktopMode(isDesktopMode)
+                        webViewRef?.customUserAgent = DeviceProfileManager.shared.activeProfile.userAgent
+                        webViewRef?.reload()
                     }
-                    Section("도구") {
-                        Button { webViewRef?.reload() } label: { Label("새로고침", systemImage: "arrow.clockwise") }
-                        // ★ 데스크톱 모드 토글
-                        Button {
-                            isDesktopMode.toggle()
-                            DeviceProfileManager.shared.setDesktopMode(isDesktopMode)
-                            webViewRef?.customUserAgent = DeviceProfileManager.shared.activeProfile.userAgent
-                            webViewRef?.reload()
-                        } label: {
-                            Label(isDesktopMode ? "모바일 모드" : "데스크톱 모드",
-                                  systemImage: isDesktopMode ? "iphone" : "desktopcomputer")
-                        }
-                        // ★ 페이지 내 검색
-                        Button {
-                            withAnimation { showFindInPage.toggle() }
-                            if !showFindInPage { clearFindHighlights() }
-                        } label: { Label("페이지 내 검색", systemImage: "doc.text.magnifyingglass") }
-                        // ★ Reader Mode
-                        Button {
-                            webViewRef?.evaluateJavaScript(ReaderModeExtractor.extractionJS) { result, _ in
-                                guard let jsonStr = result as? String,
-                                      let data = jsonStr.data(using: .utf8),
-                                      let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
-                                readerTitle = dict["title"] ?? ""
-                                readerContent = dict["content"] ?? ""
-                                if readerContent.count > 100 {
-                                    showReaderMode = true
-                                } else {
-                                    toastIsError = true; toastMessage = "이 페이지에서는 리더 모드를 사용할 수 없습니다"
-                                    Task { try? await Task.sleep(for: .seconds(3)); withAnimation { toastMessage = nil } }
-                                }
-                            }
-                        } label: { Label("리더 모드", systemImage: "doc.plaintext") }
-                        // ★ PiP (Picture-in-Picture)
-                        Button {
-                            webViewRef?.evaluateJavaScript("""
-                            (function(){
-                                var v=document.querySelector('video');
-                                if(v){
-                                    if(v.webkitSupportsPresentationMode&&v.webkitSupportsPresentationMode('picture-in-picture')){
-                                        v.webkitSetPresentationMode('picture-in-picture');
-                                    }else if(document.pictureInPictureEnabled){
-                                        v.requestPictureInPicture();
-                                    }
-                                }
-                            })()
-                            """)
-                        } label: { Label("PiP (화면 속 화면)", systemImage: "pip") }
-                        Button { isElementHideMode = true; webViewRef?.evaluateJavaScript("window._gsToggleHideMode()") } label: { Label("요소 가리기", systemImage: "eye.slash") }
-                        Button { if let h = tabManager.activeTab?.url?.host { ElementHiderStore.shared.clearRules(for: h); webViewRef?.reload() } } label: { Label("숨긴 요소 복원", systemImage: "eye") }
+                    toolButton("검색", "doc.text.magnifyingglass") {
+                        withAnimation { showFindInPage.toggle() }
+                        if !showFindInPage { clearFindHighlights() }
                     }
-                    Section {
-                        Button { showPrivacy = true } label: { Label("프라이버시 리포트", systemImage: "shield.checkered") }
-                        Button { showBookmarks = true } label: { Label("북마크 & 기록", systemImage: "bookmark") }
-                        // ★ 현재 페이지 북마크 토글
-                        if let tab = tabManager.activeTab, let url = tab.url {
-                            Button {
-                                container.bookmarkManager.toggleBookmark(title: tab.title, url: url)
-                            } label: {
-                                Label(
-                                    container.bookmarkManager.isBookmarked(url: url) ? "북마크 해제" : "북마크 추가",
-                                    systemImage: container.bookmarkManager.isBookmarked(url: url) ? "bookmark.fill" : "bookmark"
-                                )
-                            }
-                        }
-                        Button { showSettings = true } label: { Label("설정", systemImage: "gearshape") }
-                    }
-                    // ★ Fire Button (DuckDuckGo 스타일)
-                    Section {
-                        Button(role: .destructive) { fireButtonAction() } label: {
-                            Label("Fire! (데이터 삭제)", systemImage: "flame.fill")
+                    toolButton("리더", "doc.plaintext") {
+                        webViewRef?.evaluateJavaScript(ReaderModeExtractor.extractionJS) { result, _ in
+                            guard let jsonStr = result as? String, let data = jsonStr.data(using: .utf8),
+                                  let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
+                            readerTitle = dict["title"] ?? ""; readerContent = dict["content"] ?? ""
+                            if readerContent.count > 100 { showReaderMode = true }
                         }
                     }
-                    if let url = tabManager.activeTab?.url {
-                        Section { ShareLink(item: url) { Label("페이지 공유", systemImage: "square.and.arrow.up") } }
+                    toolButton("PiP", "pip") {
+                        webViewRef?.evaluateJavaScript("(function(){var v=document.querySelector('video');if(v){if(v.webkitSupportsPresentationMode){v.webkitSetPresentationMode('picture-in-picture');}else if(document.pictureInPictureEnabled){v.requestPictureInPicture();}}})()")
                     }
-                } label: {
-                    Image(systemName: "ellipsis").font(.system(size: 18, weight: .medium))
-                        .frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
+                    toolButton("요소 가리기", "eye.slash") { isElementHideMode = true; webViewRef?.evaluateJavaScript("window._gsToggleHideMode()") }
+                    toolButton("복원", "eye") { if let h = tabManager.activeTab?.url?.host { ElementHiderStore.shared.clearRules(for: h); webViewRef?.reload() } }
+                    toolButton("북마크", "bookmark") { showBookmarks = true }
+                    toolButton("리포트", "shield.checkered") { showPrivacy = true }
+                    toolButton("설정", "gearshape") { showSettings = true }
+                    toolButton("Fire!", "flame.fill") { fireButtonAction() }
                 }
-            }.padding(.bottom, 2)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+            }
         }.background(.ultraThinMaterial)
     }
 
-    // MARK: - Helpers (removed old tBtn — inlined above for fix 6)
+    // MARK: - Helpers
+
+    private func toolButton(_ label: String, _ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: icon).font(.system(size: 16, weight: .regular))
+                Text(label).font(.system(size: 9, weight: .medium))
+            }
+            .foregroundStyle(.secondary)
+            .frame(width: 52)
+        }
+    }
 
     private func navigateTo(_ input: String) {
         let t = input.trimmingCharacters(in: .whitespaces); guard !t.isEmpty else { return }
