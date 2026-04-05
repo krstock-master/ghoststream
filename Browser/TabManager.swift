@@ -100,35 +100,26 @@ final class TabManager: @unchecked Sendable {
     }
 
     func closeTab(_ tab: Tab) {
-        let tabID = tab.id
+        guard let idx = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
 
-        // ★ 마지막 탭: 새 탭 먼저 생성
+        // ★ F1 FIX: 동기적으로 처리, DispatchQueue 제거
         if tabs.count <= 1 {
+            // 마지막 탭: 새 탭으로 교체
             let newT = Tab(url: nil, sharedStore: sharedDataStore)
-            tabs.insert(newT, at: 0)
+            tabs[idx] = newT
             activeTabID = newT.id
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                Task { await tab.purge() }
-                self?.tabs.removeAll { $0.id == tabID }
-            }
+            Task { await tab.purge() }
             return
         }
 
-        // ★ 활성 탭 닫기: 먼저 전환 후 제거
-        if activeTabID == tabID {
-            if let idx = tabs.firstIndex(where: { $0.id == tabID }) {
-                let nextIdx = idx > 0 ? idx - 1 : 1
-                if nextIdx < tabs.count {
-                    activeTabID = tabs[nextIdx].id
-                }
-            }
+        // 활성 탭을 닫는 경우 인접 탭으로 전환
+        if activeTabID == tab.id {
+            let nextIdx = idx > 0 ? idx - 1 : min(idx + 1, tabs.count - 1)
+            activeTabID = tabs[nextIdx].id
         }
 
-        // ★ 비동기 제거 (ForEach 업데이트 충돌 방지)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            Task { await tab.purge() }
-            self?.tabs.removeAll { $0.id == tabID }
-        }
+        tabs.remove(at: idx)
+        Task { await tab.purge() }
     }
 
     func switchTo(_ tab: Tab) {

@@ -140,26 +140,106 @@ struct BrowserContainerView: View {
     }
 
     private var topSearchBar: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.system(size: 15))
-                TextField("검색어 또는 주소 입력", text: $addressText)
-                    .textFieldStyle(.plain).font(.system(size: 16))
-                    .autocorrectionDisabled().textInputAutocapitalization(.never)
-                    .focused($isURLFieldFocused)
-                    .onSubmit { navigateTo(addressText); closeSearch() }
-                if !addressText.isEmpty {
-                    Button { addressText = "" } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.system(size: 15))
+                    TextField("검색어 또는 주소 입력", text: $addressText)
+                        .textFieldStyle(.plain).font(.system(size: 16))
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
+                        .focused($isURLFieldFocused)
+                        .onSubmit { navigateTo(addressText); closeSearch() }
+                    if !addressText.isEmpty {
+                        Button { addressText = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 10)
+                .background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: 12))
+                Button("취소") { closeSearch() }
+                    .font(.system(size: 16, weight: .medium)).foregroundStyle(.teal)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+
+            // ★ F8: 북마크/기록 제안 (Safari 스타일)
+            if addressText.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if !container.bookmarkManager.bookmarks.isEmpty {
+                            Text("북마크").font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 12)
+                            ForEach(container.bookmarkManager.bookmarks.prefix(6)) { bm in
+                                Button {
+                                    navigateTo(bm.url.absoluteString); closeSearch()
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        ZStack {
+                                            RoundedRectangle(cornerRadius: 8).fill(Color.teal.opacity(0.1)).frame(width: 32, height: 32)
+                                            Text(String((bm.url.host ?? "?").prefix(1)).uppercased())
+                                                .font(.system(size: 14, weight: .bold)).foregroundStyle(.teal)
+                                        }
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(bm.title.isEmpty ? (bm.url.host ?? "") : bm.title)
+                                                .font(.system(size: 14, weight: .medium)).foregroundStyle(.primary).lineLimit(1)
+                                            Text(bm.url.host ?? "").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                                        }
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 16).padding(.vertical, 10)
+                                }
+                            }
+                        }
+
+                        if !container.bookmarkManager.history.isEmpty {
+                            Text("최근 방문").font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 12)
+                            ForEach(container.bookmarkManager.history.prefix(5)) { h in
+                                Button {
+                                    navigateTo(h.url.absoluteString); closeSearch()
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: "clock").foregroundStyle(.secondary).frame(width: 32)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(h.title.isEmpty ? (h.url.host ?? "") : h.title)
+                                                .font(.system(size: 14)).foregroundStyle(.primary).lineLimit(1)
+                                            Text(h.url.host ?? "").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                                        }
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 16).padding(.vertical, 8)
+                                }
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 350)
+            } else {
+                // ★ 검색어 입력 중 → 자동완성 제안
+                let filtered = container.bookmarkManager.bookmarks.filter {
+                    $0.title.localizedCaseInsensitiveContains(addressText) ||
+                    $0.url.absoluteString.localizedCaseInsensitiveContains(addressText)
+                }
+                if !filtered.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(filtered.prefix(4)) { bm in
+                            Button {
+                                navigateTo(bm.url.absoluteString); closeSearch()
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "star.fill").foregroundStyle(.yellow).font(.system(size: 12))
+                                    Text(bm.title.isEmpty ? bm.url.host ?? "" : bm.title)
+                                        .font(.system(size: 14)).foregroundStyle(.primary).lineLimit(1)
+                                    Spacer()
+                                    Text(bm.url.host ?? "").font(.system(size: 12)).foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 16).padding(.vertical, 10)
+                            }
+                        }
                     }
                 }
             }
-            .padding(.horizontal, 12).padding(.vertical, 10)
-            .background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: 12))
-            Button("취소") { closeSearch() }
-                .font(.system(size: 16, weight: .medium)).foregroundStyle(.teal)
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Color(.systemBackground))
         .onAppear { isURLFieldFocused = true }
     }

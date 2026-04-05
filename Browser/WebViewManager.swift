@@ -9,6 +9,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     let privacyEngine: PrivacyEngine
     let onMediaDetected: (DetectedMedia) -> Void
     private var pendingDownloadFilenames: [WKDownload: String] = [:] // ★ per-download filename tracking
+    private var recentlyDownloadedURLs: Set<String> = [] // ★ F3: 중복 다운로드 방지
 
     var downloadManager: MediaDownloadManager?
     var bookmarkManager: BookmarkManager?
@@ -116,6 +117,12 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         let url = navigationResponse.response.url
         let mime = navigationResponse.response.mimeType ?? ""
         let ext = url?.pathExtension.lowercased() ?? ""
+
+        // ★ F3 FIX: 이미 다운로드 중인 URL은 스킵
+        if let urlStr = url?.absoluteString, recentlyDownloadedURLs.contains(urlStr) {
+            decisionHandler(.allow)
+            return
+        }
         
         // ★ F2/F3 FIX: 미디어/파일 다운로드 (이미지는 제외 — 네비게이션 시 표시만)
         let downloadExts = [
@@ -438,6 +445,15 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     private var activeWKDownloads: [WKDownload: String] = [:]  // download → title
 
     func startWKDownload(url: URL, title: String) {
+        // ★ F3 FIX: 중복 다운로드 방지
+        let urlStr = url.absoluteString
+        guard !recentlyDownloadedURLs.contains(urlStr) else { return }
+        recentlyDownloadedURLs.insert(urlStr)
+        // 5분 후 해제 (같은 URL 재다운로드 허용)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in
+            self?.recentlyDownloadedURLs.remove(urlStr)
+        }
+
         guard let wv = webView else {
             // Fallback: WKWebView 참조 없으면 URLSession으로
             let media = DetectedMedia(url: url, type: url.absoluteString.contains(".m3u8") ? .hls : .mp4,
@@ -522,11 +538,9 @@ final class ElementHiderStore {
     }
 
     func rules(for host: String, path: String? = nil) -> [String] {
-        // 정확한 host+path 매칭 + host 전체 매칭 합산
+        // ★ F6 FIX: 정확한 host+path 매칭만 (다른 페이지로 번지지 않음)
         let exactKey = key(for: host, path: path)
-        let hostRules = store[host] ?? []
-        let exactRules = (exactKey != host) ? (store[exactKey] ?? []) : []
-        return Array(Set(hostRules + exactRules))
+        return store[exactKey] ?? []
     }
 
     func clearRules(for host: String) {
