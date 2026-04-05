@@ -11,6 +11,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Security Scan (S-002)
+        run: |
+          echo "=== 민감 정보 검사 ==="
+          FOUND=0
+          # PAT 토큰
+          if grep -rn "ghp_[a-zA-Z0-9]\{30,\}" --include="*.swift" --include="*.json" --include="*.plist" . | grep -v "AGENTS.md"; then
+            echo "❌ PAT 토큰 발견!"; FOUND=1
+          fi
+          # 핑거프린팅 JS 본문
+          if grep -rn "seededRand\|UNMASKED_VENDOR\|createDynamicsCompressor" --include="*.swift" . | grep -v "AGENTS.md"; then
+            echo "❌ 핑거프린팅 JS 노출!"; FOUND=1
+          fi
+          # CDN 패턴
+          if grep -rn "videoplayback\|googlevideo\|fbcdn.*video\|mypikpak" --include="*.swift" . | grep -v "AGENTS.md"; then
+            echo "❌ CDN 패턴 노출!"; FOUND=1
+          fi
+          if [ $FOUND -eq 1 ]; then
+            echo "::error::민감 정보가 Public 코드에 포함되어 있습니다!"
+            exit 1
+          fi
+          echo "✅ 보안 검사 통과"
+
       - name: Setup Private Package Access
         run: |
           git config --global url."https://${{ secrets.CORE_PAT }}@github.com/".insteadOf "https://github.com/"
@@ -107,6 +129,26 @@ jobs:
           cp -r "$APP_PATH" build/Payload/
           cd build && zip -r GhostStream.ipa Payload/
           echo "IPA: $(ls -lh GhostStream.ipa | awk '{print $5}')"
+
+      - name: IPA Binary Security Scan
+        run: |
+          echo "=== IPA 바이너리 민감 정보 검사 ==="
+          APP_PATH=$(find build/Payload -name "*.app" -type d | head -1)
+          BINARY="$APP_PATH/GhostStream"
+          FOUND=0
+          # PAT 토큰
+          if strings "$BINARY" | grep -q "ghp_[a-zA-Z0-9]\{30,\}"; then
+            echo "❌ 바이너리에 PAT 토큰 발견!"; FOUND=1
+          fi
+          # 하드코딩된 비밀
+          if strings "$BINARY" | grep -qi "api_key.*=\|secret_key"; then
+            echo "❌ 바이너리에 API 키 발견!"; FOUND=1
+          fi
+          if [ $FOUND -eq 1 ]; then
+            echo "::error::IPA 바이너리에 민감 정보 포함!"
+            exit 1
+          fi
+          echo "✅ IPA 보안 검사 통과"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
