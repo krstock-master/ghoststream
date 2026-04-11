@@ -67,14 +67,14 @@ struct TabGridView: View {
                 // ── Tab Grid ─────────────────────────────────────────────
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(tabManager.tabs) { tab in
+                        ForEach(Array(tabManager.tabs), id: \.id) { tab in
                             SamsungTabCard(tab: tab, isActive: tab.id == tabManager.activeTabID) {
-                                tabManager.switchTo(tab)
                                 dismiss()
-                            } onClose: {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                                    tabManager.closeTab(tab)
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                    tabManager.switchTo(tab)
                                 }
+                            } onClose: {
+                                tabManager.closeTab(tab)
                             }
                         }
                     }

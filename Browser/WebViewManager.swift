@@ -226,44 +226,10 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             let filePath = dir.appendingPathComponent(fname)
             let size = (try? FileManager.default.attributesOfItem(atPath: filePath.path)[.size] as? Int) ?? 0
             let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
-
-            // ★ 자동 갤러리 저장 (피드백 1)
-            let ext = filePath.pathExtension.lowercased()
-            let isVideo = ["mp4","m4v","mov","webm"].contains(ext)
-            let isImage = ["jpg","jpeg","png","webp","heic","gif"].contains(ext)
-            if (isVideo || isImage) && size > 1024 {
-                PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-                    guard status == .authorized || status == .limited else { return }
-                    var placeholder: PHObjectPlaceholder?
-                    PHPhotoLibrary.shared().performChanges({
-                        let req = PHAssetCreationRequest.forAsset()
-                        placeholder = req.placeholderForCreatedAsset
-                        if isVideo {
-                            req.addResource(with: .video, fileURL: filePath, options: nil)
-                        } else if ext == "gif", let data = try? Data(contentsOf: filePath) {
-                            req.addResource(with: .photo, data: data, options: nil)
-                        } else if let data = try? Data(contentsOf: filePath) {
-                            req.addResource(with: .photo, data: data, options: nil)
-                        }
-                    }) { success, _ in
-                        DispatchQueue.main.async {
-                            if success {
-                                // ★ PHAsset localIdentifier 저장 (나중에 정확한 삭제용)
-                                if let id = placeholder?.localIdentifier {
-                                    GalleryAssetTracker.shared.track(filename: fname ?? "", assetID: id)
-                                }
-                                NotificationCenter.default.post(name: .downloadCompleted,
-                                    object: "✅ \(title) 다운로드 + 갤러리 저장 완료 (\(sizeStr))")
-                            } else {
-                                NotificationCenter.default.post(name: .downloadCompleted,
-                                    object: "✅ \(title) 다운로드 완료 (\(sizeStr)) — 갤러리 저장은 수동으로")
-                            }
-                        }
-                    }
-                }
-            } else {
-                NotificationCenter.default.post(name: .downloadCompleted, object: "✅ \(title) 다운로드 완료 (\(sizeStr))")
-            }
+            // ★ F2 FIX: 자동 갤러리 저장 제거 — 사용자가 수동으로 "갤러리 저장" 버튼 사용
+            // 이전: 자동 저장 + 사용자 수동 저장 = 2개씩 중복
+            NotificationCenter.default.post(name: .downloadCompleted,
+                object: "✅ \(title) 다운로드 완료 (\(sizeStr))")
         } else {
             NotificationCenter.default.post(name: .downloadCompleted, object: "✅ \(title) 다운로드 완료")
         }

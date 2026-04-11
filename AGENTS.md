@@ -141,3 +141,24 @@ macOS 러너는 10x 과금. Private 레포 Free 2,000분 = 실제 200분.
 ✅ CI에서 git config --global url 오버라이드
 ❌ Package.swift URL에 토큰 직접 삽입
 ```
+
+### C-004: withAnimation 안에서 배열 수정 금지 (SwiftUI)
+```
+❌ withAnimation(.spring(...)) { tabManager.closeTab(tab) }
+   → 애니메이션 중 ForEach가 사라진 요소 참조 → 크래시
+✅ tabManager.closeTab(tab)  // 애니메이션 없이 직접 호출
+```
+
+### L-004: downloadDidFinish 자동 갤러리 저장 금지
+```
+❌ downloadDidFinish에서 PHPhotoLibrary.performChanges 자동 호출
+   → 자동 1회 + 사용자 수동 1회 = 갤러리 2개 중복
+✅ downloadDidFinish는 파일 저장만. 갤러리 저장은 사용자 "갤러리 저장" 버튼으로만.
+```
+
+### L-005: JS 함수 호출 시 존재 확인
+```
+❌ webViewRef?.evaluateJavaScript("window._gsToggleHideMode()")
+   → 페이지 이동/리로드 시 JS 함수 사라짐 → 호출 실패 → 상태 불일치
+✅ 명시적 인라인 JS로 상태 리셋 + fallback 호출
+```

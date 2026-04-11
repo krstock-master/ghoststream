@@ -132,7 +132,19 @@ struct BrowserContainerView: View {
             Spacer()
             Button("완료") {
                 isElementHideMode = false
-                webViewRef?.evaluateJavaScript("window._gsToggleHideMode()")
+                // ★ F3 FIX: 명시적으로 hide mode 비활성화 + CSS 정리
+                webViewRef?.evaluateJavaScript("""
+                (function(){
+                    window.__gsHideMode=false;
+                    document.querySelectorAll('[data-gs-hide-hover]').forEach(function(el){
+                        el.style.outline='';
+                        el.removeAttribute('data-gs-hide-hover');
+                    });
+                    var style=document.getElementById('gs-hide-mode-style');
+                    if(style)style.remove();
+                    if(typeof window._gsToggleHideMode==='function')window._gsToggleHideMode();
+                })()
+                """)
             }.font(.subheadline.bold()).foregroundStyle(.white)
             .padding(.horizontal, 14).padding(.vertical, 6)
             .background(.white.opacity(0.25), in: Capsule())
