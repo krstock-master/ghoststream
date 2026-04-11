@@ -14,6 +14,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     var downloadManager: MediaDownloadManager?
     var bookmarkManager: BookmarkManager?
     weak var webView: WKWebView?   // set by BrowserWebView for cookie forwarding
+    var downloadObserver: NSObjectProtocol?  // ★ NotificationCenter observer token
 
     // CF: tracks domains where we've stripped fingerprint defense scripts
     private var cfStrippedDomains: Set<String> = []

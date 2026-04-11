@@ -38,7 +38,13 @@ struct BrowserWebView: UIViewRepresentable {
 
         // ★ Listen for download requests from FullscreenOverlay / snackbar
         let coord = context.coordinator
-        NotificationCenter.default.addObserver(forName: .wkDownloadRequested, object: nil, queue: .main) { [weak coord] n in
+        // ★ FIX: 이전 옵저버 제거 후 등록 (탭 전환 시 누적 방지)
+        if let old = coord.downloadObserver {
+            NotificationCenter.default.removeObserver(old)
+        }
+        coord.downloadObserver = NotificationCenter.default.addObserver(
+            forName: .wkDownloadRequested, object: nil, queue: .main
+        ) { [weak coord] n in
             guard let media = n.object as? DetectedMedia, let coord = coord else { return }
             coord.startWKDownload(url: media.url, title: media.title)
         }
@@ -49,6 +55,10 @@ struct BrowserWebView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {}
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: WebViewCoordinator) {
+        if let obs = coordinator.downloadObserver {
+            NotificationCenter.default.removeObserver(obs)
+            coordinator.downloadObserver = nil
+        }
         coordinator.removeObservers(from: webView)
     }
 }

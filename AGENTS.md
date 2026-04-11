@@ -162,3 +162,16 @@ macOS 러너는 10x 과금. Private 레포 Free 2,000분 = 실제 200분.
    → 페이지 이동/리로드 시 JS 함수 사라짐 → 호출 실패 → 상태 불일치
 ✅ 명시적 인라인 JS로 상태 리셋 + fallback 호출
 ```
+
+### C-005: NotificationCenter block observer 누적 등록
+```
+❌ // makeUIView에서 매번 호출 → 탭 전환마다 observer 누적
+   NotificationCenter.default.addObserver(forName: .name, ...) { ... }
+   // removeObserver(coordinator, name:) → block observer에는 무효!
+
+✅ // token 저장 + 이전 제거 후 등록
+   if let old = coord.downloadObserver { NotificationCenter.default.removeObserver(old) }
+   coord.downloadObserver = NotificationCenter.default.addObserver(forName: .name, ...) { ... }
+   // dismantleUIView에서: NotificationCenter.default.removeObserver(token)
+```
+이 버그가 다운로드 중복의 근본 원인이었음 (탭 5개 = observer 5개 = 다운로드 5회 트리거)
