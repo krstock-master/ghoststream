@@ -69,10 +69,8 @@ struct TabGridView: View {
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(Array(tabManager.tabs), id: \.id) { tab in
                             SamsungTabCard(tab: tab, isActive: tab.id == tabManager.activeTabID) {
+                                tabManager.switchTo(tab)
                                 dismiss()
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                    tabManager.switchTo(tab)
-                                }
                             } onClose: {
                                 tabManager.closeTab(tab)
                             }

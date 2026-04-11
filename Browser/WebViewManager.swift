@@ -118,10 +118,13 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         let mime = navigationResponse.response.mimeType ?? ""
         let ext = url?.pathExtension.lowercased() ?? ""
 
-        // ★ F3 FIX: 이미 다운로드 중인 URL은 스킵
-        if let urlStr = url?.absoluteString, recentlyDownloadedURLs.contains(urlStr) {
-            decisionHandler(.allow)
-            return
+        // ★ F2 FIX: 이미 다운로드 중인 URL은 스킵 (정규화된 URL로 비교)
+        if let urlStr = url?.absoluteString {
+            let normalized = urlStr.components(separatedBy: "?").first ?? urlStr
+            if recentlyDownloadedURLs.contains(normalized) {
+                decisionHandler(.allow)
+                return
+            }
         }
         
         // ★ F2/F3 FIX: 미디어/파일 다운로드 (이미지는 제외 — 네비게이션 시 표시만)
@@ -411,13 +414,15 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     private var activeWKDownloads: [WKDownload: String] = [:]  // download → title
 
     func startWKDownload(url: URL, title: String) {
-        // ★ F3 FIX: 중복 다운로드 방지
-        let urlStr = url.absoluteString
-        guard !recentlyDownloadedURLs.contains(urlStr) else { return }
-        recentlyDownloadedURLs.insert(urlStr)
-        // 5분 후 해제 (같은 URL 재다운로드 허용)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in
-            self?.recentlyDownloadedURLs.remove(urlStr)
+        // ★ F2 FIX: URL 정규화로 중복 다운로드 방지
+        // 쿼리 파라미터가 다른 같은 영상 URL도 중복으로 처리
+        let normalizedURL = url.absoluteString
+            .components(separatedBy: "?").first ?? url.absoluteString
+        guard !recentlyDownloadedURLs.contains(normalizedURL) else { return }
+        recentlyDownloadedURLs.insert(normalizedURL)
+        // 3분 후 해제
+        DispatchQueue.main.asyncAfter(deadline: .now() + 180) { [weak self] in
+            self?.recentlyDownloadedURLs.remove(normalizedURL)
         }
 
         guard let wv = webView else {
