@@ -364,7 +364,8 @@ struct BrowserContainerView: View {
                 }
                 .padding(.horizontal, 14).padding(.vertical, 11)
                 .frame(maxWidth: .infinity)
-                .background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: 26))
+                .background(.ultraThinMaterial).clipShape(Capsule())
+                .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
             }
             .padding(.horizontal, 14).padding(.top, 8)
             } // end isToolbarCompact
@@ -689,15 +690,18 @@ struct NewTabPage: View {
                 }
                 .padding(.horizontal, 20)
 
-                // ★ 현재 프로필 표시 (디버그/투명성)
+                // ★ 삼성 스타일: 프라이버시 요약
                 VStack(spacing: 4) {
-                    let profile = DeviceProfileManager.shared.activeProfile
-                    Text("위장 프로필: \(profile.name)")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.secondary.opacity(0.5))
-                    Text("11-vector 핑거프린트 방어 활성")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary.opacity(0.4))
+                    let total = privacyEngine.totalTrackersBlocked + privacyEngine.totalAdsBlocked
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.shield.fill").foregroundStyle(.green).font(.system(size: 14))
+                        Text("이번 주 \(total)건의 추적 시도를 차단했습니다")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(.green.opacity(0.08))
+                    .clipShape(Capsule())
                 }
                 .padding(.top, 8)
 
