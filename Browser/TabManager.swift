@@ -3,6 +3,7 @@
 
 import SwiftUI
 import WebKit
+import GhostStreamCore
 
 // MARK: - Tab Model
 @Observable
@@ -185,31 +186,4 @@ struct PrivacyReport {
     }
 }
 
-// MARK: - Detected Media
-struct DetectedMedia: Identifiable, Hashable {
-    let id = UUID()
-    let url: URL
-    let type: MediaType
-    let quality: String
-    let title: String
-    let referer: String
-    let thumbnail: URL?
-    let estimatedSize: String?
-
-    enum MediaType: String {
-        case mp4 = "MP4"
-        case hls = "HLS"
-        case gif = "GIF"
-        case blob = "Blob"
-        case webm = "WebM"
-        case image = "Image"
-    }
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(url)
-    }
-
-    static func == (lhs: DetectedMedia, rhs: DetectedMedia) -> Bool {
-        lhs.url == rhs.url
-    }
-}
+// DetectedMedia → GhostStreamCore.SharedTypes

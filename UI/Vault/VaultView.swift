@@ -1,6 +1,7 @@
 // UI/Vault/VaultView.swift
 import SwiftUI
 import AVKit
+import GhostStreamCore
 
 struct VaultView: View {
     @Environment(VaultManager.self) private var vault

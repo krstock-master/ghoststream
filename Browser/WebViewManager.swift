@@ -434,43 +434,6 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         }.resume()
     }
 }
-// MARK: - Element Hider Store
-final class ElementHiderStore {
-    static let shared = ElementHiderStore()
-    private var store: [String: [String]] = [:] // host+path → selectors
-    init() {
-        if let d = UserDefaults.standard.data(forKey: "elementHiderRules"),
-           let s = try? JSONDecoder().decode([String:[String]].self, from: d) { store = s }
-    }
-    /// 키 생성: 정확한 페이지에만 적용 (host + path)
-    private func key(for host: String, path: String? = nil) -> String {
-        if let path = path, !path.isEmpty, path != "/" {
-            return "\(host)\(path)"
-        }
-        return host
-    }
-    func addRule(_ sel: String, for host: String, path: String? = nil) {
-        let k = key(for: host, path: path)
-        var r = store[k] ?? []
-        if !r.contains(sel) { r.append(sel); store[k] = r; save() }
-    }
-    func rules(for host: String, path: String? = nil) -> [String] {
-        // 정확한 host+path 매칭만 (다른 페이지로 번지지 않음)
-        let exactKey = key(for: host, path: path)
-        return store[exactKey] ?? []
-    }
-    func clearRules(for host: String) {
-        // host 관련 모든 룰 삭제
-        let keysToRemove = store.keys.filter { $0 == host || $0.hasPrefix(host + "/") }
-        for k in keysToRemove { store.removeValue(forKey: k) }
-        save()
-    }
-    private func save() {
-        if let d = try? JSONEncoder().encode(store) {
-            UserDefaults.standard.set(d, forKey: "elementHiderRules")
-        }
-    }
-}
 // MARK: - WebView Configuration
 enum WebViewConfigurator {
     static func makeConfiguration(for tab: Tab, privacyEngine: PrivacyEngine, coordinator: WebViewCoordinator) -> WKWebViewConfiguration {
