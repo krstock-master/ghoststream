@@ -3,44 +3,36 @@ import SwiftUI
 import GhostStreamCore
 import WebKit
 import Photos
-
 final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKDownloadDelegate, @unchecked Sendable {
     let tab: Tab
     let privacyEngine: PrivacyEngine
     let onMediaDetected: (DetectedMedia) -> Void
     private var pendingDownloadFilenames: [WKDownload: String] = [:] // ★ per-download filename tracking
     private var recentlyDownloadedURLs: Set<String> = [] // ★ F3: 중복 다운로드 방지
-
     var downloadManager: MediaDownloadManager?
     var bookmarkManager: BookmarkManager?
     weak var webView: WKWebView?   // set by BrowserWebView for cookie forwarding
     var downloadObserver: NSObjectProtocol?  // ★ NotificationCenter observer token
-
-    // CF: tracks domains where we've stripped fingerprint defense scripts
-    private var cfStrippedDomains: Set<String> = []
-    private var cfReloadPending = false
+    private var handledDomains: Set<String> = []
+    private var reloadPending = false
     private var pendingContextImageURL: URL? // ★ F3: 이미지 꾹 눌러서 저장용
-
     init(tab: Tab, privacyEngine: PrivacyEngine, onMediaDetected: @escaping (DetectedMedia) -> Void) {
         self.tab = tab; self.privacyEngine = privacyEngine; self.onMediaDetected = onMediaDetected
     }
-
     // MARK: - Navigation
     func webView(_ w: WKWebView, didStartProvisionalNavigation n: WKNavigation!) {
         tab.isLoading = true; tab.isSecure = w.url?.scheme == "https"; tab.privacyReport.isHTTPS = tab.isSecure
-        // ★ F4 FIX: 네비게이션 시작 시에도 canGoBack/Forward 즉시 갱신
+        // 네비게이션 시작 시에도 canGoBack/Forward 즉시 갱신
         tab.canGoBack = w.canGoBack; tab.canGoForward = w.canGoForward
     }
     func webView(_ w: WKWebView, didFinish n: WKNavigation!) {
         tab.isLoading = false; tab.title = w.title ?? ""; tab.url = w.url
         tab.canGoBack = w.canGoBack; tab.canGoForward = w.canGoForward
-
         // ★ 자동 방문 기록
         if let url = w.url, !tab.isPrivate,
            url.scheme == "https" || url.scheme == "http" {
             bookmarkManager?.addHistory(title: w.title ?? url.host ?? "", url: url)
         }
-
         // ★ 탭 썸네일 캡처
         let config = WKSnapshotConfiguration()
         config.snapshotWidth = 200
@@ -55,16 +47,12 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 w.evaluateJavaScript("var s=document.createElement('style');s.textContent='\(escapedCSS){display:none!important}';document.head.appendChild(s);")
             }
         }
-
-        // ── Cloudflare: detect challenge, strip fingerprint scripts, reload ONCE ─
-        // Skip if this domain already had scripts stripped (prevents second loop)
         let host = w.url?.host ?? ""
-        guard !cfReloadPending else {
-            cfReloadPending = false
+        guard !reloadPending else {
+            reloadPending = false
             return
         }
-        guard !cfStrippedDomains.contains(host) else { return }
-
+        guard !handledDomains.contains(host) else { return }
         w.evaluateJavaScript("""
         (function(){
             var t = document.title || '';
@@ -78,30 +66,25 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             guard let str = result as? String, str == "1",
                   let self = self, let w = w else { return }
             let domain = w.url?.host ?? ""
-            self.cfStrippedDomains.insert(domain)
-            self.cfReloadPending = true
-            // ★ KEY FIX: remove ALL user scripts so fingerprint spoofing is gone
+            self.handledDomains.insert(domain)
+            self.reloadPending = true
             let uc = w.configuration.userContentController
             uc.removeAllUserScripts()
-            // Re-add ONLY the media-detection script (no fingerprint defense)
             uc.addUserScript(WKUserScript(
                 source: PrivacyScripts.mainJS,
                 injectionTime: .atDocumentEnd,
                 forMainFrameOnly: true
             ))
-            // ★ CF FIX: 데스크톱 모드에서 CF 감지 시 모바일 UA로 복원
             if DeviceProfileManager.shared.isDesktopMode {
                 w.customUserAgent = DeviceProfileManager.shared.currentProfile.userAgent
             }
-            // Now reload — CF will see real Safari fingerprint → pass
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { w.reload() }
         }
     }
     func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
     func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
-
     // MARK: - Block App Store redirects (PikPak 등)
-    // ★ F3 FIX: 최소한의 차단만 — 기본 동작 유지
+    // 최소한의 차단만 — 기본 동작 유지
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.allow); return }
         let scheme = url.scheme?.lowercased() ?? ""
@@ -112,14 +95,12 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         }
         decisionHandler(.allow)
     }
-
     // MARK: - Intercept media responses → WKDownload
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         let url = navigationResponse.response.url
         let mime = navigationResponse.response.mimeType ?? ""
         let ext = url?.pathExtension.lowercased() ?? ""
-
-        // ★ F2 FIX: 이미 다운로드 중인 URL은 스킵 (정규화된 URL로 비교)
+        // 이미 다운로드 중인 URL은 스킵 (정규화된 URL로 비교)
         if let urlStr = url?.absoluteString {
             let normalized = urlStr.components(separatedBy: "?").first ?? urlStr
             if recentlyDownloadedURLs.contains(normalized) {
@@ -127,7 +108,6 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 return
             }
         }
-        
         // ★ F2/F3 FIX: 미디어/파일 다운로드 (이미지는 제외 — 네비게이션 시 표시만)
         let downloadExts = [
             // 영상/오디오
@@ -144,13 +124,11 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             decisionHandler(.download)
             return
         }
-        
         // Video/Audio MIME type in main frame → trigger WKDownload  
         if (mime.hasPrefix("video/") || mime.hasPrefix("audio/")) && navigationResponse.isForMainFrame {
             decisionHandler(.download)
             return
         }
-
         // ★ Content-Disposition: attachment → 무조건 다운로드
         if let httpResponse = navigationResponse.response as? HTTPURLResponse,
            let contentDisp = httpResponse.value(forHTTPHeaderField: "Content-Disposition"),
@@ -158,7 +136,6 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             decisionHandler(.download)
             return
         }
-
         // ★ 바이너리 MIME → 다운로드 (application/octet-stream, application/zip 등)
         let downloadMimes = ["application/octet-stream", "application/zip", "application/x-rar",
                              "application/x-7z-compressed", "application/pdf",
@@ -168,25 +145,20 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             decisionHandler(.download)
             return
         }
-        
         // Non-main-frame media → emit for overlay button
         if let url = url, (mime.hasPrefix("video/") || mime.contains("gif")) && !navigationResponse.isForMainFrame {
             let type: DetectedMedia.MediaType = mime.contains("gif") ? .gif : .mp4
             emitMedia(url: url, type: type, quality: "Direct")
         }
-        
         decisionHandler(.allow)
     }
-
     // MARK: - WKDownloadDelegate (iOS 14.5+)
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
         download.delegate = self
     }
-
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
         download.delegate = self
     }
-
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String) async -> URL? {
         // ★ HTTP validation
         if let httpResponse = response as? HTTPURLResponse {
@@ -201,7 +173,6 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 return nil
             }
         }
-
         // Build filename: prefer title from activeWKDownloads, then suggested
         let title = activeWKDownloads[download] ?? suggestedFilename
         var filename = suggestedFilename
@@ -212,7 +183,6 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         filename = filename.replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: ":", with: "_")
         pendingDownloadFilenames[download] = filename
-
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Downloads", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -220,7 +190,6 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         if FileManager.default.fileExists(atPath: dest.path) { try? FileManager.default.removeItem(at: dest) }
         return dest
     }
-
     func downloadDidFinish(_ download: WKDownload) {
         let title = activeWKDownloads.removeValue(forKey: download) ?? pendingDownloadFilenames[download] ?? "파일"
         let fname = pendingDownloadFilenames.removeValue(forKey: download)
@@ -230,7 +199,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             let filePath = dir.appendingPathComponent(fname)
             let size = (try? FileManager.default.attributesOfItem(atPath: filePath.path)[.size] as? Int) ?? 0
             let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
-            // ★ F2 FIX: 자동 갤러리 저장 제거 — 사용자가 수동으로 "갤러리 저장" 버튼 사용
+            // 자동 갤러리 저장 제거 — 사용자가 수동으로 "갤러리 저장" 버튼 사용
             // 이전: 자동 저장 + 사용자 수동 저장 = 2개씩 중복
             NotificationCenter.default.post(name: .downloadCompleted,
                 object: "✅ \(title) 다운로드 완료 (\(sizeStr))")
@@ -238,7 +207,6 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             NotificationCenter.default.post(name: .downloadCompleted, object: "✅ \(title) 다운로드 완료")
         }
     }
-
     func download(_ download: WKDownload, didFailWithError error: any Error, resumeData: Data?) {
         activeWKDownloads.removeValue(forKey: download)
         let nsError = error as NSError
@@ -251,12 +219,10 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         }
         NotificationCenter.default.post(name: .downloadFailed, object: msg)
     }
-
     // MARK: - New window (target=_blank)
     func webView(_ w: WKWebView, createWebViewWith c: WKWebViewConfiguration, for a: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if a.targetFrame == nil { w.load(a.request) }; return nil
     }
-
     // MARK: - Pull-to-Refresh
     @objc func handlePullToRefresh(_ sender: UIRefreshControl) {
         webView?.reload()
@@ -264,17 +230,13 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             sender.endRefreshing()
         }
     }
-
     // MARK: - Context Menu (long-press)
     func webView(_ webView: WKWebView, contextMenuConfigurationFor elementInfo: WKContextMenuElementInfo) async -> UIContextMenuConfiguration? {
         let linkURL = elementInfo.linkURL
-
-        // ★ F2 FIX: 링크가 없으면 iOS 기본 메뉴 사용 (Save Photo 등 네이티브)
+        // 링크가 없으면 iOS 기본 메뉴 사용 (Save Photo 등 네이티브)
         guard let linkURL = linkURL else { return nil }
-
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
             var actions: [UIAction] = []
-
             actions.append(UIAction(title: "새 탭에서 열기", image: UIImage(systemName: "plus.square.on.square")) { _ in
                 NotificationCenter.default.post(name: .openInNewTab, object: linkURL)
             })
@@ -287,11 +249,9 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             actions.append(UIAction(title: "링크 복사", image: UIImage(systemName: "doc.on.doc")) { _ in
                 UIPasteboard.general.url = linkURL
             })
-
             return UIMenu(children: actions)
         }
     }
-
     // MARK: - JS Bridge
     func userContentController(_ uc: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let dict = message.body as? [String: Any] else { return }
@@ -327,8 +287,8 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 NotificationCenter.default.post(name: .downloadFailed, object: "이 영상은 스트리밍 전용으로 직접 다운로드할 수 없습니다")
                 return
             }
-            // ★ 방법 1: WKWebView.startDownload — 브라우저 세션(쿠키/인증) 그대로 사용
-            // 삼성 브라우저 / 알로하와 동일한 방식
+            
+            
             startWKDownload(url: url2, title: (dict["title"] as? String) ?? "Video")
         case "alohaDownload":
             guard let urlStr = dict["url"] as? String, let url = URL(string: urlStr) else { return }
@@ -351,7 +311,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                     FullscreenDownloadOverlay.shared.show(url: url, title: title, quality: quality, downloadManager: dm)
                 }
             } else {
-                // ★ 방법 1: WKWebView.startDownload
+                
                 startWKDownload(url: url, title: title)
             }
         case "blobCapture":
@@ -385,7 +345,6 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         default: break
         }
     }
-
     // MARK: - Cookie Sync — ★ 쿠키를 먼저 동기화한 후 다운로드 시작
     func syncCookiesToDownloadManager() {
         guard let wv = webView, let dm = downloadManager else { return }
@@ -397,7 +356,6 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             dm.urlSession?.configuration.httpCookieStorage?.setCookies(cookies, for: wv.url, mainDocumentURL: nil)
         }
     }
-
     // ★ NEW: Download with cookies pre-loaded (async-safe)
     func downloadWithCookiesSync(media: DetectedMedia) {
         guard let wv = webView, let dm = downloadManager else { return }
@@ -408,14 +366,12 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             }
         }
     }
-
     // MARK: - ★★★ WKWebView.startDownload — 핵심 다운로드 방법 ★★★
     // 삼성 브라우저 / 알로하와 동일: 브라우저 자체 네트워크 스택 사용
     // → 쿠키, 인증 토큰, Referer 자동 포함 → CDN이 정상 응답
     private var activeWKDownloads: [WKDownload: String] = [:]  // download → title
-
     func startWKDownload(url: URL, title: String) {
-        // ★ F2 FIX: URL 정규화로 중복 다운로드 방지
+        // URL 정규화로 중복 다운로드 방지
         // 쿼리 파라미터가 다른 같은 영상 URL도 중복으로 처리
         let normalizedURL = url.absoluteString
             .components(separatedBy: "?").first ?? url.absoluteString
@@ -425,7 +381,6 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         DispatchQueue.main.asyncAfter(deadline: .now() + 180) { [weak self] in
             self?.recentlyDownloadedURLs.remove(normalizedURL)
         }
-
         guard let wv = webView else {
             // Fallback: WKWebView 참조 없으면 URLSession으로
             let media = DetectedMedia(url: url, type: url.absoluteString.contains(".m3u8") ? .hls : .mp4,
@@ -434,7 +389,6 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             downloadWithCookiesSync(media: media)
             return
         }
-
         // HLS는 URLSession으로 (m3u8 파싱 필요)
         if url.absoluteString.contains(".m3u8") {
             let media = DetectedMedia(url: url, type: .hls, quality: "HLS", title: title,
@@ -442,11 +396,9 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             downloadWithCookiesSync(media: media)
             return
         }
-
         // ★ MP4/WebM/MOV: WKWebView.startDownload — 브라우저 세션 그대로 사용
         var request = URLRequest(url: url)
         request.setValue(tab.url?.absoluteString ?? "", forHTTPHeaderField: "Referer")
-
         Task { @MainActor in
             do {
                 let download = try await wv.startDownload(using: request)
@@ -461,13 +413,11 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             }
         }
     }
-
     private func emitMedia(url: URL, type: DetectedMedia.MediaType, quality: String) {
         let media = DetectedMedia(url: url, type: type, quality: quality,
             title: url.deletingPathExtension().lastPathComponent, referer: tab.url?.absoluteString ?? "", thumbnail: nil, estimatedSize: nil)
         if !tab.detectedMedia.contains(media) { tab.detectedMedia.append(media); onMediaDetected(media) }
     }
-
     // MARK: - Save to Photos (with proper permission check)
     static func saveURLToPhotos(_ url: URL) {
         let ext = url.pathExtension.lowercased()
@@ -484,17 +434,14 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         }.resume()
     }
 }
-
 // MARK: - Element Hider Store
 final class ElementHiderStore {
     static let shared = ElementHiderStore()
     private var store: [String: [String]] = [:] // host+path → selectors
-
     init() {
         if let d = UserDefaults.standard.data(forKey: "elementHiderRules"),
            let s = try? JSONDecoder().decode([String:[String]].self, from: d) { store = s }
     }
-
     /// 키 생성: 정확한 페이지에만 적용 (host + path)
     private func key(for host: String, path: String? = nil) -> String {
         if let path = path, !path.isEmpty, path != "/" {
@@ -502,33 +449,28 @@ final class ElementHiderStore {
         }
         return host
     }
-
     func addRule(_ sel: String, for host: String, path: String? = nil) {
         let k = key(for: host, path: path)
         var r = store[k] ?? []
         if !r.contains(sel) { r.append(sel); store[k] = r; save() }
     }
-
     func rules(for host: String, path: String? = nil) -> [String] {
-        // ★ F6 FIX: 정확한 host+path 매칭만 (다른 페이지로 번지지 않음)
+        // 정확한 host+path 매칭만 (다른 페이지로 번지지 않음)
         let exactKey = key(for: host, path: path)
         return store[exactKey] ?? []
     }
-
     func clearRules(for host: String) {
         // host 관련 모든 룰 삭제
         let keysToRemove = store.keys.filter { $0 == host || $0.hasPrefix(host + "/") }
         for k in keysToRemove { store.removeValue(forKey: k) }
         save()
     }
-
     private func save() {
         if let d = try? JSONEncoder().encode(store) {
             UserDefaults.standard.set(d, forKey: "elementHiderRules")
         }
     }
 }
-
 // MARK: - WebView Configuration
 enum WebViewConfigurator {
     static func makeConfiguration(for tab: Tab, privacyEngine: PrivacyEngine, coordinator: WebViewCoordinator) -> WKWebViewConfiguration {
@@ -552,27 +494,21 @@ enum WebViewConfigurator {
         privacyEngine.contentBlocker.applyCachedRules(to: uc)
         return config
     }
-
 }
-
 // MARK: - Gallery Asset Tracker (갤러리 저장 시 PHAsset ID 추적)
 final class GalleryAssetTracker {
     static let shared = GalleryAssetTracker()
     private var map: [String: String] = [:] // filename → PHAsset localIdentifier
-
     func track(filename: String, assetID: String) {
         map[filename] = assetID
     }
-
     func assetID(for filename: String) -> String? {
         return map[filename]
     }
-
     func remove(filename: String) {
         map.removeValue(forKey: filename)
     }
 }
-
 // MARK: - Notifications
 extension Notification.Name {
     static let openInNewTab = Notification.Name("openInNewTab")

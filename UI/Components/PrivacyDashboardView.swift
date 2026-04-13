@@ -98,14 +98,14 @@ struct PrivacyDashboardView: View {
                 }
 
                 // What's blocked
-                Section("차단 대상 (30,000+ 규칙)") {
+                Section("차단 대상") {
                     blockRow("Google Analytics", "google-analytics.com")
                     blockRow("Facebook Pixel", "facebook.com/tr")
                     blockRow("DoubleClick Ads", "doubleclick.net")
                     blockRow("Hotjar", "hotjar.com")
                     blockRow("Amplitude", "amplitude.com")
                     blockRow("TikTok Analytics", "analytics.tiktok.com")
-                    blockRow("기타 30,000+ 도메인", "easylist + easyprivacy")
+                    blockRow("기타 광고·트래커", "콘텐츠 차단 규칙")
                 }
             }
             .navigationTitle("프라이버시").navigationBarTitleDisplayMode(.inline)

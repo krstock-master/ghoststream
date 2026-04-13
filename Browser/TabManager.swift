@@ -102,7 +102,7 @@ final class TabManager: @unchecked Sendable {
     func closeTab(_ tab: Tab) {
         guard let idx = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
 
-        // ★ F1 FIX: 동기적으로 처리, DispatchQueue 제거
+        
         if tabs.count <= 1 {
             // 마지막 탭: 새 탭으로 교체
             let newT = Tab(url: nil, sharedStore: sharedDataStore)

@@ -132,7 +132,7 @@ struct BrowserContainerView: View {
             Spacer()
             Button("완료") {
                 isElementHideMode = false
-                // ★ F3 FIX: 명시적으로 hide mode 비활성화 + CSS 정리
+                // 명시적으로 hide mode 비활성화 + CSS 정리
                 webViewRef?.evaluateJavaScript("""
                 (function(){
                     window.__gsHideMode=false;
@@ -174,7 +174,7 @@ struct BrowserContainerView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
 
-            // ★ F8: 북마크/기록 제안 (Safari 스타일)
+            // 북마크/기록 제안 (Safari 스타일)
             if addressText.isEmpty {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -265,7 +265,7 @@ struct BrowserContainerView: View {
                 BrowserWebView(tab: tab, privacyEngine: privacyEngine, downloadManager: downloadManager,
                     bookmarkManager: container.bookmarkManager,
                     onMediaDetected: { _ in
-                        // ★ F4: 미디어 감지 알림 제거 (사용자 피드백: 효용성 없음)
+                        // 미디어 감지 알림 제거 (사용자 피드백: 효용성 없음)
                         // 미디어는 여전히 감지되어 다운로드 시트에서 사용 가능
                     }, webViewRef: $webViewRef).id(tab.id)
             }
@@ -309,7 +309,7 @@ struct BrowserContainerView: View {
                 Button {
                 withAnimation(.easeInOut(duration: 0.25)) {
                     isAddressEditing = true
-                    // ★ F7 FIX: 주소창 탭 시 비움 → 바로 검색/입력 가능
+                    // 주소창 탭 시 비움 → 바로 검색/입력 가능
                     addressText = ""
                 }
             } label: {
@@ -347,7 +347,7 @@ struct BrowserContainerView: View {
                     if tabManager.activeTab?.isLoading == true {
                         ProgressView().scaleEffect(0.55)
                     } else if tabManager.activeTab?.url != nil {
-                        // ★ F2: 북마크 버튼 (주소바에 배치)
+                        // 북마크 버튼 (주소바에 배치)
                         if let tab = tabManager.activeTab, let url = tab.url {
                             Button {
                                 container.bookmarkManager.toggleBookmark(title: tab.title, url: url)
@@ -653,7 +653,7 @@ struct NewTabPage: View {
                 }
                 .padding(.horizontal, 20)
 
-                // ★ F3: 북마크 (있으면 표시, 없으면 기본 사이트)
+                // 북마크 (있으면 표시, 없으면 기본 사이트)
                 VStack(alignment: .leading, spacing: 12) {
                     if !bookmarkManager.bookmarks.isEmpty {
                         Text("북마크").font(.system(size: 13, weight: .semibold))

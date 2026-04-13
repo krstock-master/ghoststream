@@ -11,20 +11,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Security Scan (S-002)
+      - name: Security Scan
         run: |
           echo "=== 민감 정보 검사 ==="
           FOUND=0
-          # PAT 토큰
-          if grep -rn "ghp_[a-zA-Z0-9]\{30,\}" --include="*.swift" --include="*.json" --include="*.plist" . | grep -v "AGENTS.md"; then
+          if grep -rn "ghp_[a-zA-Z0-9]\{30,\}" --include="*.swift" --include="*.json" --include="*.plist" .; then
             echo "❌ PAT 토큰 발견!"; FOUND=1
           fi
-          # 핑거프린팅 JS 본문
-          if grep -rn "seededRand\|UNMASKED_VENDOR\|createDynamicsCompressor" --include="*.swift" . | grep -v "AGENTS.md"; then
+          if grep -rn "seededRand\|UNMASKED_VENDOR\|createDynamicsCompressor" --include="*.swift" .; then
             echo "❌ 핑거프린팅 JS 노출!"; FOUND=1
           fi
-          # CDN 패턴
-          if grep -rn "videoplayback\|googlevideo\|fbcdn.*video\|mypikpak" --include="*.swift" . | grep -v "AGENTS.md"; then
+          if grep -rn "videoplayback\|googlevideo\|fbcdn.*video\|mypikpak" --include="*.swift" .; then
             echo "❌ CDN 패턴 노출!"; FOUND=1
           fi
           if [ $FOUND -eq 1 ]; then
