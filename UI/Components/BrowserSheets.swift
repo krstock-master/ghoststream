@@ -53,7 +53,7 @@ struct PrivacyReportSheet: View {
 
 struct TabGridView: View {
     @Environment(TabManager.self) private var tabManager
-    @Environment(\.dismiss) private var dismiss
+    @Binding var showGrid: Bool
 
     // Samsung-style: 2-col cards with large preview area
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
@@ -69,8 +69,9 @@ struct TabGridView: View {
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(Array(tabManager.tabs), id: \.id) { tab in
                             SamsungTabCard(tab: tab, isActive: tab.id == tabManager.activeTabID) {
+                                // ★ F1 근본 수정: switchTo 후 binding으로 시트 닫기
                                 tabManager.switchTo(tab)
-                                dismiss()
+                                showGrid = false
                             } onClose: {
                                 tabManager.closeTab(tab)
                             }
@@ -92,7 +93,7 @@ struct TabGridView: View {
     // MARK: - Header
     private var tabHeader: some View {
         HStack(spacing: 0) {
-            Button("완료") { dismiss() }
+            Button("완료") { showGrid = false }
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.teal)
                 .padding(.leading, 18)
@@ -113,7 +114,7 @@ struct TabGridView: View {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     tabManager.closeAllTabs()
                 }
-                dismiss()
+                showGrid = false
             } label: {
                 Text("모두 닫기")
                     .font(.system(size: 14))
@@ -134,7 +135,7 @@ struct TabGridView: View {
             // Private tab
             Button {
                 tabManager.newTab(isPrivate: true)
-                dismiss()
+                showGrid = false
             } label: {
                 VStack(spacing: 4) {
                     Image(systemName: "lock.square.fill")
@@ -150,7 +151,7 @@ struct TabGridView: View {
             // New tab (centre, prominent)
             Button {
                 tabManager.newTab()
-                dismiss()
+                showGrid = false
             } label: {
                 ZStack {
                     Circle()

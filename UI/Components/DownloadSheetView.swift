@@ -135,6 +135,23 @@ struct DownloadsManagerView: View {
             HStack {
                 Text("완료").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
                 Spacer()
+                // ★ F2: 모두 갤러리에 저장
+                Button {
+                    for dl in dm.completedDownloads {
+                        guard let url = dl.localURL else { continue }
+                        let ext = url.pathExtension.lowercased()
+                        let isMedia = ["mp4","m4v","mov","webm","jpg","jpeg","png","webp","heic","gif"].contains(ext)
+                        if isMedia && !savedToGallery.contains(dl.id.uuidString) {
+                            saveToGallery(url: url, type: dl.media.type)
+                            savedToGallery.insert(dl.id.uuidString)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "photo.badge.arrow.down")
+                        Text("모두 저장")
+                    }.font(.system(size: 12, weight: .medium)).foregroundStyle(.teal)
+                }
                 Text("\(dm.completedDownloads.count)개").font(.system(size: 12)).foregroundStyle(.secondary)
             }.padding(.top, 12)
         }

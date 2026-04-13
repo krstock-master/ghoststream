@@ -112,7 +112,9 @@ struct BrowserContainerView: View {
         .sheet(isPresented: $showDownloads) { DownloadsManagerView() }
         .sheet(isPresented: $showSettings) { SettingsView() }
         .sheet(isPresented: $showPrivacy) { PrivacyDashboardView() }
-        .sheet(isPresented: $showTabGrid) { TabGridView() }
+        .sheet(isPresented: $showTabGrid) {
+            TabGridView(showGrid: $showTabGrid)
+        }
         .sheet(isPresented: $showBookmarks) {
             BookmarkHistoryView { url in
                 tabManager.activeTab?.url = url
