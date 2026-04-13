@@ -2,6 +2,7 @@
 // GhostStream - Multi-format media download engine
 
 import Foundation
+import GhostStreamCore
 import AVFoundation
 import SwiftUI
 import WebKit

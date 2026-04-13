@@ -1,4 +1,5 @@
 // UI/Components/FullscreenDownloadOverlay.swift
+import GhostStreamCore
 // GhostStream — Aloha-style fullscreen download bar
 // UIWindow at .statusBar+200 — the ONLY way to show UI over iOS native video fullscreen
 

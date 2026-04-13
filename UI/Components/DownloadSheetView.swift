@@ -1,4 +1,5 @@
 // UI/Components/DownloadsManagerView.swift
+import GhostStreamCore
 import SwiftUI
 import AVKit
 import AVFoundation
