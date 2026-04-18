@@ -132,11 +132,11 @@ struct DownloadsManagerView: View {
 
         // Completed downloads section
         if !dm.completedDownloads.isEmpty {
-            HStack {
+            HStack(spacing: 12) {
                 Text("완료").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
                 Spacer()
-                // ★ F2: 모두 갤러리에 저장
                 Button {
+                    var count = 0
                     for dl in dm.completedDownloads {
                         guard let url = dl.localURL else { continue }
                         let ext = url.pathExtension.lowercased()
@@ -144,15 +144,27 @@ struct DownloadsManagerView: View {
                         if isMedia && !savedToGallery.contains(dl.id.uuidString) {
                             saveToGallery(url: url, type: dl.media.type)
                             savedToGallery.insert(dl.id.uuidString)
+                            count += 1
                         }
                     }
+                    NotificationCenter.default.post(name: .downloadCompleted,
+                        object: "✅ \(count)개 갤러리 저장 완료")
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "photo.badge.arrow.down")
                         Text("모두 저장")
-                    }.font(.system(size: 12, weight: .medium)).foregroundStyle(.teal)
+                    }.font(.system(size: 12, weight: .semibold)).foregroundStyle(.teal)
                 }
-                Text("\(dm.completedDownloads.count)개").font(.system(size: 12)).foregroundStyle(.secondary)
+                Button {
+                    dm.completedDownloads.removeAll()
+                    NotificationCenter.default.post(name: .downloadCompleted,
+                        object: "🗑 목록 삭제 완료")
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "trash")
+                        Text("모두 삭제")
+                    }.font(.system(size: 12, weight: .semibold)).foregroundStyle(.red)
+                }
             }.padding(.top, 12)
         }
         ForEach(dm.completedDownloads) { dl in
@@ -269,22 +281,40 @@ struct DownloadsManagerView: View {
         if files.isEmpty {
             emptyState("저장된 파일 없음", icon: "folder", desc: "다운로드된 파일이 여기에 저장됩니다")
         } else {
-            // ★ F1: 모두 갤러리 저장 버튼
-            HStack {
+            // ★ 헤더: 파일 수 + 모두 갤러리 저장 + 모두 삭제
+            HStack(spacing: 12) {
                 Text("\(files.count)개 파일").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
                 Spacer()
                 Button {
+                    var count = 0
                     for url in files {
                         let ext = url.pathExtension.lowercased()
                         if ["mp4","m4v","mov","webm","jpg","jpeg","png","webp","heic","gif"].contains(ext) {
                             saveToGallery(url: url, type: detectType(url))
+                            count += 1
                         }
                     }
+                    // ★ 토스트 피드백
+                    NotificationCenter.default.post(name: .downloadCompleted,
+                        object: "✅ \(count)개 파일 갤러리 저장 완료")
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "photo.badge.arrow.down")
-                        Text("모두 갤러리 저장")
-                    }.font(.system(size: 13, weight: .semibold)).foregroundStyle(.teal)
+                        Text("모두 저장")
+                    }.font(.system(size: 12, weight: .semibold)).foregroundStyle(.teal)
+                }
+                Button {
+                    for url in files {
+                        try? FileManager.default.removeItem(at: url)
+                    }
+                    fileListRefresh = UUID()
+                    NotificationCenter.default.post(name: .downloadCompleted,
+                        object: "🗑 모든 파일 삭제 완료")
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "trash")
+                        Text("모두 삭제")
+                    }.font(.system(size: 12, weight: .semibold)).foregroundStyle(.red)
                 }
             }.padding(.vertical, 4)
 
@@ -298,7 +328,6 @@ struct DownloadsManagerView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    // ★ F3: 갤러리 저장 버튼 직접 노출
                     let ext = url.pathExtension.lowercased()
                     if ["mp4","m4v","mov","webm","jpg","jpeg","png","webp","heic","gif"].contains(ext) {
                         Button { saveToGallery(url: url, type: detectType(url)) } label: {
@@ -308,14 +337,15 @@ struct DownloadsManagerView: View {
                     Button { openFile(url, type: detectType(url)) } label: {
                         Image(systemName: "play.circle.fill").font(.title3).foregroundStyle(.teal)
                     }
-                }
-                .padding(12).background(Color(.secondarySystemGroupedBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
-                .swipeActions(edge: .trailing) {
-                    Button(role: .destructive) {
+                    // ★ 개별 삭제 버튼
+                    Button {
                         try? FileManager.default.removeItem(at: url)
                         fileListRefresh = UUID()
-                    } label: { Label("삭제", systemImage: "trash") }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary.opacity(0.5))
+                    }
                 }
+                .padding(12).background(Color(.secondarySystemGroupedBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
             }
         }
     }
