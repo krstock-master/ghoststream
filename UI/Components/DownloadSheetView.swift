@@ -265,49 +265,55 @@ struct DownloadsManagerView: View {
     @ViewBuilder
     private var filesTab: some View {
         let files = getDownloadedFiles()
-        let _ = fileListRefresh // ★ 삭제 후 갱신 트리거
+        let _ = fileListRefresh
         if files.isEmpty {
             emptyState("저장된 파일 없음", icon: "folder", desc: "다운로드된 파일이 여기에 저장됩니다")
         } else {
-            ForEach(files, id: \.absoluteString) { url in
-                Button { openFile(url, type: detectType(url)) } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: iconFor(url)).foregroundStyle(.teal).frame(width: 28)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(url.lastPathComponent).font(.subheadline).lineLimit(1).foregroundStyle(.primary)
-                            let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
-                            Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
-                                .font(.caption).foregroundStyle(.secondary)
+            // ★ F1: 모두 갤러리 저장 버튼
+            HStack {
+                Text("\(files.count)개 파일").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    for url in files {
+                        let ext = url.pathExtension.lowercased()
+                        if ["mp4","m4v","mov","webm","jpg","jpeg","png","webp","heic","gif"].contains(ext) {
+                            saveToGallery(url: url, type: detectType(url))
                         }
-                        Spacer()
-                        Image(systemName: "play.circle").foregroundStyle(.teal)
                     }
-                    .padding(12).background(Color(.secondarySystemGroupedBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "photo.badge.arrow.down")
+                        Text("모두 갤러리 저장")
+                    }.font(.system(size: 13, weight: .semibold)).foregroundStyle(.teal)
                 }
-                .contextMenu {
-                    Button { saveToGallery(url: url, type: detectType(url)) } label: { Label("갤러리 저장", systemImage: "photo.badge.arrow.down") }
-                    Button {
-                        Task {
-                            do {
-                                try await vault.unlock()
-                                try await vault.store(fileURL: url, originalName: url.lastPathComponent)
-                                try? FileManager.default.removeItem(at: url)
-                                await Self.deleteFromPhotoLibrary(filename: url.lastPathComponent)
-                                await MainActor.run {
-                                    fileListRefresh = UUID()
-                                    NotificationCenter.default.post(name: .downloadCompleted, object: "🔒 보안 폴더에 이동 완료")
-                                }
-                            } catch {
-                                await MainActor.run {
-                                    NotificationCenter.default.post(name: .downloadFailed, object: "보안 폴더 저장 실패")
-                                }
-                            }
+            }.padding(.vertical, 4)
+
+            ForEach(files, id: \.absoluteString) { url in
+                let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+                HStack(spacing: 12) {
+                    Image(systemName: iconFor(url)).foregroundStyle(.teal).font(.system(size: 20)).frame(width: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(url.lastPathComponent).font(.subheadline).lineLimit(1).foregroundStyle(.primary)
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    // ★ F3: 갤러리 저장 버튼 직접 노출
+                    let ext = url.pathExtension.lowercased()
+                    if ["mp4","m4v","mov","webm","jpg","jpeg","png","webp","heic","gif"].contains(ext) {
+                        Button { saveToGallery(url: url, type: detectType(url)) } label: {
+                            Image(systemName: "photo.badge.arrow.down").foregroundStyle(.teal)
                         }
-                    } label: { Label("보안 폴더로 이동", systemImage: "lock.shield") }
-                    ShareLink(item: url) { Label("공유", systemImage: "square.and.arrow.up") }
+                    }
+                    Button { openFile(url, type: detectType(url)) } label: {
+                        Image(systemName: "play.circle.fill").font(.title3).foregroundStyle(.teal)
+                    }
+                }
+                .padding(12).background(Color(.secondarySystemGroupedBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
+                .swipeActions(edge: .trailing) {
                     Button(role: .destructive) {
                         try? FileManager.default.removeItem(at: url)
-                        fileListRefresh = UUID() // ★ 목록 갱신
+                        fileListRefresh = UUID()
                     } label: { Label("삭제", systemImage: "trash") }
                 }
             }

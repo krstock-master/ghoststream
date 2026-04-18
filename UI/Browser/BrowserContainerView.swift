@@ -311,8 +311,8 @@ struct BrowserContainerView: View {
                 Button {
                 withAnimation(.easeInOut(duration: 0.25)) {
                     isAddressEditing = true
-                    // 주소창 탭 시 비움 → 바로 검색/입력 가능
-                    addressText = ""
+                    // ★ F5: URL 유지 (사용자가 수정 가능, Safari 방식)
+                    addressText = tabManager.activeTab?.url?.absoluteString ?? ""
                 }
             } label: {
                 HStack(spacing: 8) {

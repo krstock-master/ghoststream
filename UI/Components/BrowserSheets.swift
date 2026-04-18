@@ -68,12 +68,17 @@ struct TabGridView: View {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(Array(tabManager.tabs), id: \.id) { tab in
-                            SamsungTabCard(tab: tab, isActive: tab.id == tabManager.activeTabID) {
-                                // ★ F1 근본 수정: switchTo 후 binding으로 시트 닫기
-                                tabManager.switchTo(tab)
+                            let tabID = tab.id
+                            SamsungTabCard(tab: tab, isActive: tabID == tabManager.activeTabID) {
+                                // ★ F2: ID로 탭 찾아 전환 (참조 캡처 문제 방지)
+                                if let found = tabManager.tabs.first(where: { $0.id == tabID }) {
+                                    tabManager.switchTo(found)
+                                }
                                 showGrid = false
                             } onClose: {
-                                tabManager.closeTab(tab)
+                                if let found = tabManager.tabs.first(where: { $0.id == tabID }) {
+                                    tabManager.closeTab(found)
+                                }
                             }
                         }
                     }
