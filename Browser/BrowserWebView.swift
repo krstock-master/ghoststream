@@ -16,17 +16,40 @@ struct BrowserWebView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> WKWebView {
+        // ★ 탭이 이미 WebView를 가지고 있으면 재사용
+        if let existing = tab.webView {
+            // 새 coordinator에 delegate 재할당
+            existing.navigationDelegate = context.coordinator
+            existing.uiDelegate = context.coordinator
+            context.coordinator.observeWebView(existing)
+            context.coordinator.webView = existing
+            context.coordinator.downloadManager = downloadManager
+            context.coordinator.bookmarkManager = bookmarkManager
+            DispatchQueue.main.async { webViewRef = existing }
+
+            let coord = context.coordinator
+            if let old = coord.downloadObserver { NotificationCenter.default.removeObserver(old) }
+            coord.downloadObserver = NotificationCenter.default.addObserver(
+                forName: .wkDownloadRequested, object: nil, queue: .main
+            ) { [weak coord] n in
+                guard let media = n.object as? DetectedMedia, let coord = coord else { return }
+                coord.startWKDownload(url: media.url, title: media.title)
+            }
+            return existing
+        }
+
+        // 새 WKWebView 생성
         let config = WebViewConfigurator.makeConfiguration(for: tab, privacyEngine: privacyEngine, coordinator: context.coordinator)
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
-        // ★ Fake UA 적용 (DeviceProfile과 일관된 UA)
         webView.customUserAgent = DeviceProfileManager.shared.activeProfile.userAgent
         context.coordinator.downloadManager = downloadManager
         context.coordinator.bookmarkManager = bookmarkManager
         context.coordinator.observeWebView(webView)
         context.coordinator.webView = webView
+        tab.webView = webView
         DispatchQueue.main.async { webViewRef = webView }
         if let url = tab.url { webView.load(URLRequest(url: url)) }
 

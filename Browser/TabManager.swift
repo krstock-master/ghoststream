@@ -21,9 +21,12 @@ final class Tab: Identifiable, @unchecked Sendable {
     var isSecure: Bool = false
     var detectedMedia: [DetectedMedia] = []
     var privacyReport: PrivacyReport = PrivacyReport()
-    var thumbnail: UIImage? // ★ 탭 썸네일 미리보기
+    var thumbnail: UIImage?
 
-    // Group support (Vivaldi-style tab stacking)
+    // ★ 각 탭이 자체 WKWebView 소유 (탭 전환 시 재생성 방지)
+    var webView: WKWebView?
+
+    // Group support
     var groupID: UUID?
     var groupName: String?
 
@@ -54,10 +57,8 @@ final class Tab: Identifiable, @unchecked Sendable {
     /// 탭 닫기 시 모든 데이터 즉시 삭제
     func purge() async {
         let types = WKWebsiteDataStore.allWebsiteDataTypes()
-        await dataStore.removeData(
-            ofTypes: types,
-            modifiedSince: .distantPast
-        )
+        await dataStore.removeData(ofTypes: types, modifiedSince: .distantPast)
+        await MainActor.run { webView = nil }
     }
 }
 
