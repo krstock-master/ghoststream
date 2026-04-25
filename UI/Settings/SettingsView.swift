@@ -41,7 +41,7 @@ struct SettingsView: View {
                     }
                     HStack {
                         Label("방어 벡터", systemImage: "shield.lefthalf.filled"); Spacer()
-                        Text("11개").foregroundStyle(.secondary).font(.subheadline)
+                        Text("15개").foregroundStyle(.secondary).font(.subheadline)
                     }
                     Button {
                         DeviceProfileManager.shared.refreshProfile()

@@ -53,6 +53,11 @@ struct BrowserContainerView: View {
             // ★ 피싱 URL 검사
             if let url = url { phishingRisk = PhishingDetector.shared.assess(url) }
         }
+        .onChange(of: tabManager.activeTabID) { _, _ in
+            // ★ F3: 탭 전환 시 툴바 상태 초기화 (하단 메뉴 사라짐 방지)
+            isToolbarCompact = false
+            if let wv = tabManager.activeTab?.webView { webViewRef = wv }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openInNewTab)) { n in
             if let url = n.object as? URL { tabManager.newTab(url: url) }
         }
