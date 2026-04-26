@@ -124,6 +124,19 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             decisionHandler(.download)
             return
         }
+        // ★ GoFile/파일 호스팅 다운로드 URL 패턴
+        let host = url?.host?.lowercased() ?? ""
+        if host.contains("gofile.io") && (url?.path.contains("/download") == true || url?.path.contains("/dl") == true) {
+            decisionHandler(.download)
+            return
+        }
+        // 기타 파일 호스팅 직접 다운로드 패턴
+        if host.contains("mediafire.com") || host.contains("mega.nz") || host.contains("pixeldrain.com") {
+            if mime.contains("octet-stream") || mime.contains("application/") {
+                decisionHandler(.download)
+                return
+            }
+        }
         // Video/Audio MIME type in main frame → trigger WKDownload  
         if (mime.hasPrefix("video/") || mime.hasPrefix("audio/")) && navigationResponse.isForMainFrame {
             decisionHandler(.download)
@@ -454,7 +467,18 @@ enum WebViewConfigurator {
         uc.addUserScript(WKUserScript(source: PrivacyScripts.earlyJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         uc.addUserScript(WKUserScript(source: PrivacyScripts.mainJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
         config.userContentController = uc
-        privacyEngine.contentBlocker.applyCachedRules(to: uc)
+        // ★ 광고 차단 규칙 적용 (컴파일 완료 여부에 따라)
+        if privacyEngine.contentBlocker.isCompiled {
+            privacyEngine.contentBlocker.applyCachedRules(to: uc)
+        } else {
+            // 컴파일 미완료 시 → 비동기로 적용
+            Task {
+                await privacyEngine.contentBlocker.compile()
+                await MainActor.run {
+                    privacyEngine.contentBlocker.applyCachedRules(to: uc)
+                }
+            }
+        }
         return config
     }
 }
