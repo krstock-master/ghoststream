@@ -9,10 +9,8 @@ struct SettingsView: View {
     @AppStorage("blockTrackers") private var blockTrackers = true
     @AppStorage("blockFingerprinting") private var blockFingerprinting = true
     @AppStorage("blockAds") private var blockAds = true
-    @AppStorage("defaultQuality") private var defaultQuality = "720p"
     @AppStorage("autoLockVault") private var autoLockVault = true
     @AppStorage("searchEngine") private var searchEngine = "DuckDuckGo"
-    @AppStorage("autoSaveToGallery") private var autoSaveToGallery = true
     @AppStorage("appTheme") private var appTheme = "system"
     @AppStorage("addressBarPosition") private var addressBarBottom = true
     @AppStorage("autoDismissCookies") private var autoDismissCookies = true
@@ -32,32 +30,9 @@ struct SettingsView: View {
                     }
                 } header: { Text("프라이버시 & 보안") } footer: { Text("광고, 트래커, 핑거프린팅을 차단합니다.") }
 
-                // ★ 위장 프로필 정보
                 Section {
-                    HStack {
-                        Label("위장 기기", systemImage: "iphone.gen3"); Spacer()
-                        Text(DeviceProfileManager.shared.activeProfile.name)
-                            .foregroundStyle(.secondary).font(.subheadline)
-                    }
-                    HStack {
-                        Label("방어 벡터", systemImage: "shield.lefthalf.filled"); Spacer()
-                        Text("15개").foregroundStyle(.secondary).font(.subheadline)
-                    }
-                    Button {
-                        DeviceProfileManager.shared.refreshProfile()
-                        NotificationCenter.default.post(name: .downloadCompleted, object: "새 위장 프로필로 전환됨: \(DeviceProfileManager.shared.activeProfile.name)")
-                    } label: {
-                        Label("프로필 갱신", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                } header: { Text("핑거프린트 위장") } footer: { Text("세션마다 대중적인 iPhone 모델로 위장하여 기기 식별을 차단합니다.") }
-
-                Section {
-                    Toggle(isOn: $autoSaveToGallery) { Label("다운로드 후 자동 갤러리 저장", systemImage: "photo.badge.arrow.down") }
-                    Picker(selection: $defaultQuality) {
-                        Text("1080p").tag("1080p"); Text("720p").tag("720p"); Text("480p").tag("480p"); Text("자동").tag("Auto")
-                    } label: { Label("기본 화질", systemImage: "dial.medium") }
                     Toggle(isOn: $autoLockVault) { Label("보안 폴더 자동 잠금", systemImage: "lock.shield") }
-                } header: { Text("다운로드 & 저장") } footer: { Text("다운로드 완료 시 자동으로 사진 앱에 저장됩니다.") }
+                } header: { Text("보안 폴더") }
 
                 Section {
                     Picker(selection: $searchEngine) {

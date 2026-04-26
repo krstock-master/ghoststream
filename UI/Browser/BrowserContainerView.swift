@@ -342,14 +342,16 @@ struct BrowserContainerView: View {
                     Spacer()
                     if let rpt = tabManager.activeTab?.privacyReport,
                        (rpt.adsBlocked + rpt.trackersBlocked) > 0 {
-                        HStack(spacing: 3) {
-                            Image(systemName: "shield.checkered").font(.system(size: 10, weight: .semibold))
-                            Text("\(rpt.adsBlocked + rpt.trackersBlocked)")
-                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                        Button { showPrivacy = true } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "shield.checkered").font(.system(size: 10, weight: .semibold))
+                                Text("\(rpt.adsBlocked + rpt.trackersBlocked)")
+                                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                            }
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(.green.opacity(0.12), in: Capsule())
                         }
-                        .foregroundStyle(.green)
-                        .padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(.green.opacity(0.12), in: Capsule())
                     }
                     if tabManager.activeTab?.isLoading == true {
                         ProgressView().scaleEffect(0.55)
@@ -449,10 +451,7 @@ struct BrowserContainerView: View {
                     toolButton("PiP", "pip") {
                         webViewRef?.evaluateJavaScript("(function(){var v=document.querySelector('video');if(v){if(v.webkitSupportsPresentationMode){v.webkitSetPresentationMode('picture-in-picture');}else if(document.pictureInPictureEnabled){v.requestPictureInPicture();}}})()")
                     }
-                    toolButton("요소 가리기", "eye.slash") { isElementHideMode = true; webViewRef?.evaluateJavaScript("window._gsToggleHideMode()") }
-                    toolButton("복원", "eye") { if let h = tabManager.activeTab?.url?.host { ElementHiderStore.shared.clearRules(for: h); webViewRef?.reload() } }
                     toolButton("북마크", "bookmark") { showBookmarks = true }
-                    toolButton("리포트", "shield.checkered") { showPrivacy = true }
                     toolButton("설정", "gearshape") { showSettings = true }
                     toolButton("Fire!", "flame.fill") { fireButtonAction() }
                 }
