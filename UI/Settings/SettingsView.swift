@@ -15,6 +15,7 @@ struct SettingsView: View {
     @AppStorage("addressBarPosition") private var addressBarBottom = true
     @AppStorage("autoDismissCookies") private var autoDismissCookies = true
     @State private var showClearAlert = false
+    @State private var profileChanged = false
 
     var body: some View {
         NavigationStack {
@@ -29,6 +30,34 @@ struct SettingsView: View {
                         Text("\(container.contentBlocker.ruleCount)개").foregroundStyle(.secondary).font(.subheadline)
                     }
                 } header: { Text("프라이버시 & 보안") } footer: { Text("광고, 트래커, 핑거프린팅을 차단합니다.") }
+
+                // ★ 기기 위장 (DeviceProfile)
+                Section {
+                    HStack {
+                        Label("현재 기기", systemImage: "iphone.gen3"); Spacer()
+                        Text(DeviceProfileManager.shared.activeProfile.name)
+                            .foregroundStyle(.teal).font(.subheadline)
+                    }
+                    Button {
+                        DeviceProfileManager.shared.refreshProfile()
+                        profileChanged = true
+                        Task {
+                            try? await Task.sleep(for: .seconds(2))
+                            withAnimation { profileChanged = false }
+                        }
+                    } label: {
+                        HStack {
+                            Label("다른 기기로 변경", systemImage: "arrow.triangle.2.circlepath")
+                            Spacer()
+                            if profileChanged {
+                                Text("✅ \(DeviceProfileManager.shared.activeProfile.name)")
+                                    .font(.caption).foregroundStyle(.green)
+                            }
+                        }
+                    }
+                } header: { Text("기기 위장") } footer: {
+                    Text("웹사이트에 다른 iPhone 모델로 보이게 합니다. 변경 후 새 탭에서 적용됩니다.")
+                }
 
                 Section {
                     Toggle(isOn: $autoLockVault) { Label("보안 폴더 자동 잠금", systemImage: "lock.shield") }
