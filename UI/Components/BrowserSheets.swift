@@ -55,9 +55,6 @@ struct TabGridView: View {
     @Environment(TabManager.self) private var tabManager
     @Binding var showGrid: Bool
 
-    // Samsung-style: 2-col cards with large preview area
-    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -66,18 +63,29 @@ struct TabGridView: View {
 
                 // ── Tab Grid ─────────────────────────────────────────────
                 ScrollView {
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(Array(tabManager.tabs), id: \.id) { tab in
-                            let tabID = tab.id
-                            SamsungTabCard(tab: tab, isActive: tabID == tabManager.activeTabID) {
-                                // ★ F2: ID로 탭 찾아 전환 (참조 캡처 문제 방지)
-                                if let found = tabManager.tabs.first(where: { $0.id == tabID }) {
-                                    tabManager.switchTo(found)
-                                }
-                                showGrid = false
-                            } onClose: {
-                                if let found = tabManager.tabs.first(where: { $0.id == tabID }) {
-                                    tabManager.closeTab(found)
+                    // ★ LazyVGrid 제거 — 수동 그리드로 교체 (lazy loading 터치 버그 해결)
+                    let tabs = Array(tabManager.tabs)
+                    VStack(spacing: 12) {
+                        ForEach(0..<((tabs.count + 1) / 2), id: \.self) { row in
+                            HStack(spacing: 12) {
+                                ForEach(0..<2, id: \.self) { col in
+                                    let idx = row * 2 + col
+                                    if idx < tabs.count {
+                                        let tab = tabs[idx]
+                                        let tabID = tab.id
+                                        SamsungTabCard(tab: tab, isActive: tabID == tabManager.activeTabID) {
+                                            if let found = tabManager.tabs.first(where: { $0.id == tabID }) {
+                                                tabManager.switchTo(found)
+                                            }
+                                            showGrid = false
+                                        } onClose: {
+                                            if let found = tabManager.tabs.first(where: { $0.id == tabID }) {
+                                                tabManager.closeTab(found)
+                                            }
+                                        }
+                                    } else {
+                                        Color.clear.frame(maxWidth: .infinity)
+                                    }
                                 }
                             }
                         }
@@ -202,9 +210,8 @@ struct SamsungTabCard: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            // Card body
-            Button(action: onSelect) {
-                VStack(spacing: 0) {
+            // Card body — onTapGesture (Button 중첩 문제 방지)
+            VStack(spacing: 0) {
                     // ── Preview area ──────────────────────────────────────
                     ZStack {
                         RoundedRectangle(cornerRadius: 0)
@@ -261,7 +268,8 @@ struct SamsungTabCard: View {
                     .background(Color(.systemBackground))
                 }
             }
-            .buttonStyle(.plain)
+            .contentShape(Rectangle()) // ★ 전체 영역 터치 가능
+            .onTapGesture { onSelect() }
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
