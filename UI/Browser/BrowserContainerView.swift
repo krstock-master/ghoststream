@@ -549,16 +549,17 @@ struct BrowserContainerView: View {
     // MARK: - ★ Fire Button (DuckDuckGo 스타일 — 즉시 삭제)
     private func fireButtonAction() {
         let types = WKWebsiteDataStore.allWebsiteDataTypes()
-        WKWebsiteDataStore.default().removeData(ofTypes: types, modifiedSince: .distantPast) {
-            // 탭 초기화
-            tabManager.closeAllTabs()
-            tabManager.newTab()
-            // 프로필 갱신 (새 세션)
-            DeviceProfileManager.shared.refreshProfile()
-            // 피드백
-            toastIsError = false
-            toastMessage = "🔥 모든 브라우징 데이터가 삭제되었습니다"
-            Task { try? await Task.sleep(for: .seconds(3)); withAnimation { toastMessage = nil } }
+        // ★ 기본 + 공유 데이터 스토어 모두 삭제
+        WKWebsiteDataStore.default().removeData(ofTypes: types, modifiedSince: .distantPast) {}
+        tabManager.sharedDataStore.removeData(ofTypes: types, modifiedSince: .distantPast) {
+            DispatchQueue.main.async { [self] in
+                tabManager.closeAllTabs()
+                tabManager.newTab()
+                DeviceProfileManager.shared.refreshProfile()
+                toastIsError = false
+                toastMessage = "🔥 모든 브라우징 데이터가 삭제되었습니다"
+                Task { try? await Task.sleep(for: .seconds(3)); withAnimation { toastMessage = nil } }
+            }
         }
     }
 

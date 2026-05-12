@@ -50,6 +50,15 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         let host = w.url?.host ?? ""
         guard !reloadPending else {
             reloadPending = false
+            // ★ CF 바이패스 성공 — 스크립트 재등록
+            // cf_clearance 쿠키가 설정되었으므로 이후 핑거프린팅 방어가 다시 적용되어도 CF 챌린지 없음
+            let uc = w.configuration.userContentController
+            uc.removeAllUserScripts()
+            if let fp = privacyEngine.fingerprintDefenseScript {
+                uc.addUserScript(WKUserScript(source: fp, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+            }
+            uc.addUserScript(WKUserScript(source: PrivacyScripts.earlyJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+            uc.addUserScript(WKUserScript(source: PrivacyScripts.mainJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
             return
         }
         guard !handledDomains.contains(host) else { return }
