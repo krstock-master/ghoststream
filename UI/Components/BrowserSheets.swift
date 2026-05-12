@@ -267,7 +267,6 @@ struct SamsungTabCard: View {
                     .padding(.vertical, 8)
                     .background(Color(.systemBackground))
                 }
-            }
             .contentShape(Rectangle()) // ★ 전체 영역 터치 가능
             .onTapGesture { onSelect() }
             .clipShape(RoundedRectangle(cornerRadius: 12))
