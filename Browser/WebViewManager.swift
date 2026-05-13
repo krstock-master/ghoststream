@@ -50,18 +50,36 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         let host = w.url?.host ?? ""
         guard !reloadPending else {
             reloadPending = false
-            // ★ CF 바이패스 성공 — 스크립트 재등록
-            // cf_clearance 쿠키가 설정되었으므로 이후 핑거프린팅 방어가 다시 적용되어도 CF 챌린지 없음
+            // ★ CF 바이패스 성공 — 핑거프린팅 방어는 재등록하지 않음!
+            // CF 도메인에서 핑거프린팅 방어를 다시 켜면 cf_clearance 만료 시 재챌린지 → 무한 루프
+            // earlyJS(미디어 감지) + mainJS만 재등록
             let uc = w.configuration.userContentController
             uc.removeAllUserScripts()
-            if let fp = privacyEngine.fingerprintDefenseScript {
-                uc.addUserScript(WKUserScript(source: fp, injectionTime: .atDocumentStart, forMainFrameOnly: false))
-            }
             uc.addUserScript(WKUserScript(source: PrivacyScripts.earlyJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
             uc.addUserScript(WKUserScript(source: PrivacyScripts.mainJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
             return
         }
-        guard !handledDomains.contains(host) else { return }
+        // ★ handledDomains에 있는 도메인에서 또 CF가 뜨면 → 재처리 허용
+        if handledDomains.contains(host) {
+            // CF 재챌린지 감지 (cf_clearance 만료 시)
+            w.evaluateJavaScript("""
+            (function(){
+                var t = document.title || '';
+                return (t === 'Just a moment...' || !!document.querySelector('#challenge-form,.cf-browser-verification')) ? '1' : '0';
+            })()
+            """) { [weak self, weak w] result, _ in
+                guard let str = result as? String, str == "1",
+                      let self = self, let w = w else { return }
+                // 이전 handledDomains 기록 제거 후 재처리
+                self.handledDomains.remove(host)
+                self.reloadPending = true
+                let uc = w.configuration.userContentController
+                uc.removeAllUserScripts()
+                uc.addUserScript(WKUserScript(source: PrivacyScripts.mainJS, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { w.reload() }
+            }
+            return
+        }
         w.evaluateJavaScript("""
         (function(){
             var t = document.title || '';
@@ -220,9 +238,13 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         if let fname = fname {
             let filePath = dir.appendingPathComponent(fname)
             let size = (try? FileManager.default.attributesOfItem(atPath: filePath.path)[.size] as? Int) ?? 0
+            // ★ 빈 파일 또는 에러 페이지 감지
+            if size < 100 {
+                try? FileManager.default.removeItem(at: filePath)
+                NotificationCenter.default.post(name: .downloadFailed, object: "다운로드 실패: 파일이 비어 있음")
+                return
+            }
             let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
-            // 자동 갤러리 저장 제거 — 사용자가 수동으로 "갤러리 저장" 버튼 사용
-            // 이전: 자동 저장 + 사용자 수동 저장 = 2개씩 중복
             NotificationCenter.default.post(name: .downloadCompleted,
                 object: "✅ \(title) 다운로드 완료 (\(sizeStr))")
         } else {
@@ -231,6 +253,13 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     }
     func download(_ download: WKDownload, didFailWithError error: any Error, resumeData: Data?) {
         activeWKDownloads.removeValue(forKey: download)
+        // ★ 불완전 파일 정리
+        if let fname = pendingDownloadFilenames.removeValue(forKey: download) {
+            let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Downloads", isDirectory: true)
+            let file = dir.appendingPathComponent(fname)
+            try? FileManager.default.removeItem(at: file)
+        }
         let nsError = error as NSError
         let msg: String
         switch nsError.code {
