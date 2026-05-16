@@ -90,22 +90,29 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 || location.hostname === 'challenges.cloudflare.com') ? '1' : '0';
         })()
         """) { [weak self, weak w] result, _ in
-            guard let str = result as? String, str == "1",
-                  let self = self, let w = w else { return }
-            let domain = w.url?.host ?? ""
-            self.handledDomains.insert(domain)
-            self.reloadPending = true
-            let uc = w.configuration.userContentController
-            uc.removeAllUserScripts()
-            uc.addUserScript(WKUserScript(
-                source: PrivacyScripts.mainJS,
-                injectionTime: .atDocumentEnd,
-                forMainFrameOnly: true
-            ))
-            if DeviceProfileManager.shared.isDesktopMode {
-                w.customUserAgent = DeviceProfileManager.shared.currentProfile.userAgent
+            guard let self = self, let w = w, let str = result as? String else { return }
+            if str == "1" {
+                // ★ CF 챌린지 감지 → 스크립트 제거 + 리로드
+                let domain = w.url?.host ?? ""
+                self.handledDomains.insert(domain)
+                self.reloadPending = true
+                let uc = w.configuration.userContentController
+                uc.removeAllUserScripts()
+                uc.addUserScript(WKUserScript(
+                    source: PrivacyScripts.mainJS,
+                    injectionTime: .atDocumentEnd,
+                    forMainFrameOnly: true
+                ))
+                if DeviceProfileManager.shared.isDesktopMode {
+                    w.customUserAgent = DeviceProfileManager.shared.currentProfile.userAgent
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { w.reload() }
+            } else {
+                // ★ CF 아님 → 핑거프린팅 방어 주입 (로드 후 방어)
+                if let fp = self.privacyEngine.fingerprintDefenseScript {
+                    w.evaluateJavaScript(fp)
+                }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { w.reload() }
         }
     }
     func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
@@ -499,9 +506,9 @@ enum WebViewConfigurator {
         for name in ["mediaFound","alohaDownload","downloadVideo","blobCapture","elementHidden","privacyEvent"] {
             uc.add(coordinator, name: name)
         }
-        if let fp = privacyEngine.fingerprintDefenseScript {
-            uc.addUserScript(WKUserScript(source: fp, injectionTime: .atDocumentStart, forMainFrameOnly: false))
-        }
+        // ★ 핑거프린팅 방어는 makeConfiguration에서 추가하지 않음
+        // → didFinish에서 CF가 아닌 페이지에만 evaluateJavaScript로 주입
+        // → CF 도메인에서는 절대 실행되지 않아 무한 루프 방지
         uc.addUserScript(WKUserScript(source: PrivacyScripts.earlyJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         uc.addUserScript(WKUserScript(source: PrivacyScripts.mainJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
         config.userContentController = uc
