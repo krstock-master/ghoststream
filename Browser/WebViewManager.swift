@@ -80,6 +80,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             }
             return
         }
+        // ★ CF 감지 + 핑거프린팅 방어를 하나의 JS 호출로 합침 (속도 최적화)
         w.evaluateJavaScript("""
         (function(){
             var t = document.title || '';
@@ -92,7 +93,6 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         """) { [weak self, weak w] result, _ in
             guard let self = self, let w = w, let str = result as? String else { return }
             if str == "1" {
-                // ★ CF 챌린지 감지 → 스크립트 제거 + 리로드
                 let domain = w.url?.host ?? ""
                 self.handledDomains.insert(domain)
                 self.reloadPending = true
@@ -108,7 +108,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { w.reload() }
             } else {
-                // ★ CF 아님 → 핑거프린팅 방어 주입 (로드 후 방어)
+                // ★ 핑거프린팅 방어 즉시 주입 (비CF 페이지)
                 if let fp = self.privacyEngine.fingerprintDefenseScript {
                     w.evaluateJavaScript(fp)
                 }

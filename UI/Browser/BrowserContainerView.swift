@@ -378,85 +378,83 @@ struct BrowserContainerView: View {
             }
             .padding(.horizontal, 14).padding(.top, 8)
             } // end isToolbarCompact
-            // ★ Safari-style bottom toolbar
-            HStack(spacing: 0) {
+            // ★ Firefox-style bottom toolbar: ← → [address pill] tabs ⋯
+            HStack(spacing: 4) {
                 Button { webViewRef?.goBack() } label: {
-                    Image(systemName: "chevron.left").font(.system(size: 20, weight: .regular))
+                    Image(systemName: "chevron.left").font(.system(size: 18))
                         .foregroundStyle(tabManager.activeTab?.canGoBack == true ? Color.primary : Color.primary.opacity(0.2))
-                        .frame(maxWidth: .infinity).frame(height: 50).contentShape(Rectangle())
+                        .frame(width: 40, height: 44).contentShape(Rectangle())
                 }
                 Button { webViewRef?.goForward() } label: {
-                    Image(systemName: "chevron.right").font(.system(size: 20, weight: .regular))
+                    Image(systemName: "chevron.right").font(.system(size: 18))
                         .foregroundStyle(tabManager.activeTab?.canGoForward == true ? Color.primary : Color.primary.opacity(0.2))
-                        .frame(maxWidth: .infinity).frame(height: 50).contentShape(Rectangle())
-                }
-                // 공유
-                Button {
-                    if let url = tabManager.activeTab?.url,
-                       let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                       let root = scene.windows.first?.rootViewController {
-                        root.present(UIActivityViewController(activityItems: [url], applicationActivities: nil), animated: true)
-                    }
-                } label: {
-                    Image(systemName: "square.and.arrow.up").font(.system(size: 20, weight: .regular))
-                        .frame(maxWidth: .infinity).frame(height: 50).contentShape(Rectangle())
-                }
-                // 다운로드
-                Button { showDownloads = true } label: {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: "arrow.down.to.line").font(.system(size: 20, weight: .regular))
-                            .frame(maxWidth: .infinity).frame(height: 50).contentShape(Rectangle())
-                        let cnt = downloadManager.downloads.count + downloadManager.completedDownloads.count
-                        if cnt > 0 {
-                            Text("\(cnt)").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
-                                .frame(minWidth: 16, minHeight: 16)
-                                .background(.teal, in: Circle()).offset(x: -8, y: 10)
-                        }
-                    }
+                        .frame(width: 40, height: 44).contentShape(Rectangle())
                 }
                 // 탭
                 Button { showTabGrid = true } label: {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 5).stroke(Color.primary.opacity(0.6), lineWidth: 1.5)
-                            .frame(width: 22, height: 22)
+                        RoundedRectangle(cornerRadius: 4.5).stroke(Color.primary.opacity(0.55), lineWidth: 1.5)
+                            .frame(width: 20, height: 20)
                         Text("\(tabManager.tabs.count)")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    }.frame(maxWidth: .infinity).frame(height: 50).contentShape(Rectangle())
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    }.frame(width: 40, height: 44).contentShape(Rectangle())
                 }
-            }
-            // ★ 도구 가로 스크롤
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
-                    toolButton("새 탭", "plus.square") { tabManager.newTab() }
-                    toolButton("프라이빗", "lock.square") { tabManager.newTab(isPrivate: true) }
-                    toolButton("새로고침", "arrow.clockwise") { webViewRef?.reload() }
-                    toolButton(isDesktopMode ? "모바일" : "데스크톱", isDesktopMode ? "iphone" : "desktopcomputer") {
-                        isDesktopMode.toggle()
-                        DeviceProfileManager.shared.setDesktopMode(isDesktopMode)
-                        webViewRef?.customUserAgent = DeviceProfileManager.shared.activeProfile.userAgent
-                        webViewRef?.reload()
+                // 메뉴 (Firefox 스타일)
+                Menu {
+                    Section {
+                        Button { tabManager.newTab() } label: { Label("새 탭", systemImage: "plus.square") }
+                        Button { tabManager.newTab(isPrivate: true) } label: { Label("프라이빗 탭", systemImage: "lock.square") }
+                        Button { webViewRef?.reload() } label: { Label("새로고침", systemImage: "arrow.clockwise") }
                     }
-                    toolButton("검색", "doc.text.magnifyingglass") {
-                        withAnimation { showFindInPage.toggle() }
-                        if !showFindInPage { clearFindHighlights() }
-                    }
-                    toolButton("리더", "doc.plaintext") {
-                        webViewRef?.evaluateJavaScript(ReaderModeExtractor.extractionJS) { result, _ in
-                            guard let jsonStr = result as? String, let data = jsonStr.data(using: .utf8),
-                                  let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
-                            readerTitle = dict["title"] ?? ""; readerContent = dict["content"] ?? ""
-                            if readerContent.count > 100 { showReaderMode = true }
+                    Section {
+                        Button { showDownloads = true } label: {
+                            let cnt = downloadManager.downloads.count + downloadManager.completedDownloads.count
+                            Label("다운로드" + (cnt > 0 ? " (\(cnt))" : ""), systemImage: "arrow.down.to.line")
+                        }
+                        Button { showBookmarks = true } label: { Label("북마크 & 기록", systemImage: "bookmark") }
+                        Button { showPrivacy = true } label: { Label("보호 현황", systemImage: "shield.checkered") }
+                        if let url = tabManager.activeTab?.url {
+                            Button {
+                                if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                                   let root = scene.windows.first?.rootViewController {
+                                    root.present(UIActivityViewController(activityItems: [url], applicationActivities: nil), animated: true)
+                                }
+                            } label: { Label("공유", systemImage: "square.and.arrow.up") }
                         }
                     }
-                    toolButton("PiP", "pip") {
-                        webViewRef?.evaluateJavaScript("(function(){var v=document.querySelector('video');if(v){if(v.webkitSupportsPresentationMode){v.webkitSetPresentationMode('picture-in-picture');}else if(document.pictureInPictureEnabled){v.requestPictureInPicture();}}})()")
+                    Section {
+                        Button {
+                            isDesktopMode.toggle()
+                            DeviceProfileManager.shared.setDesktopMode(isDesktopMode)
+                            webViewRef?.customUserAgent = DeviceProfileManager.shared.activeProfile.userAgent
+                            webViewRef?.reload()
+                        } label: { Label(isDesktopMode ? "모바일 모드" : "데스크톱 모드", systemImage: isDesktopMode ? "iphone" : "desktopcomputer") }
+                        Button {
+                            withAnimation { showFindInPage.toggle() }
+                            if !showFindInPage { clearFindHighlights() }
+                        } label: { Label("페이지 내 검색", systemImage: "doc.text.magnifyingglass") }
+                        Button {
+                            webViewRef?.evaluateJavaScript(ReaderModeExtractor.extractionJS) { result, _ in
+                                guard let jsonStr = result as? String, let data = jsonStr.data(using: .utf8),
+                                      let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
+                                readerTitle = dict["title"] ?? ""; readerContent = dict["content"] ?? ""
+                                if readerContent.count > 100 { showReaderMode = true }
+                            }
+                        } label: { Label("리더 모드", systemImage: "doc.plaintext") }
+                        Button {
+                            webViewRef?.evaluateJavaScript("(function(){var v=document.querySelector('video');if(v){if(v.webkitSupportsPresentationMode){v.webkitSetPresentationMode('picture-in-picture');}else if(document.pictureInPictureEnabled){v.requestPictureInPicture();}}})()")
+                        } label: { Label("PiP", systemImage: "pip") }
                     }
-                    toolButton("북마크", "bookmark") { showBookmarks = true }
-                    toolButton("설정", "gearshape") { showSettings = true }
-                    toolButton("Fire!", "flame.fill") { fireButtonAction() }
+                    Section {
+                        Button { showSettings = true } label: { Label("설정", systemImage: "gearshape") }
+                        Button(role: .destructive) { fireButtonAction() } label: { Label("Fire!", systemImage: "flame.fill") }
+                    }
+                } label: {
+                    Image(systemName: "line.3.horizontal").font(.system(size: 18))
+                        .frame(width: 40, height: 44).contentShape(Rectangle())
                 }
-                .padding(.horizontal, 12).padding(.vertical, 6)
             }
+            .padding(.horizontal, 4).padding(.bottom, 2)
         }.background(.ultraThinMaterial)
     }
 
