@@ -123,7 +123,9 @@ struct BrowserContainerView: View {
         .sheet(isPresented: $showBookmarks) {
             BookmarkHistoryView { url in
                 tabManager.activeTab?.url = url
-                webViewRef?.load(URLRequest(url: url))
+                if let wv = tabManager.activeTab?.webView {
+                    wv.load(URLRequest(url: url))
+                }
             }
         }
         .sheet(isPresented: $showReaderMode) {
@@ -269,12 +271,17 @@ struct BrowserContainerView: View {
             if tab.url == nil {
                 NewTabPage { navigateTo($0) }
             } else {
-                BrowserWebView(tab: tab, privacyEngine: privacyEngine, downloadManager: downloadManager,
-                    bookmarkManager: container.bookmarkManager,
-                    onMediaDetected: { _ in
-                        // 미디어 감지 알림 제거 (사용자 피드백: 효용성 없음)
-                        // 미디어는 여전히 감지되어 다운로드 시트에서 사용 가능
-                    }, webViewRef: $webViewRef).id(tab.id)
+                ZStack(alignment: .top) {
+                    BrowserWebView(tab: tab, privacyEngine: privacyEngine, downloadManager: downloadManager,
+                        bookmarkManager: container.bookmarkManager,
+                        onMediaDetected: { _ in }, webViewRef: $webViewRef).id(tab.id)
+                    // ★ Firefox 스타일 프로그레스 바
+                    if tab.isLoading {
+                        ProgressView(value: tab.loadProgress)
+                            .tint(.teal)
+                            .scaleEffect(x: 1, y: 0.5, anchor: .top)
+                    }
+                }
             }
         }
     }
@@ -321,60 +328,53 @@ struct BrowserContainerView: View {
                 }
             } label: {
                 HStack(spacing: 8) {
-                    // ★ 피싱 위험도 표시
+                    // 보안 상태 아이콘
                     Group {
                         switch phishingRisk {
                         case .phishing:
-                            Image(systemName: "exclamationmark.shield.fill")
-                                .foregroundStyle(.red)
+                            Image(systemName: "exclamationmark.shield.fill").foregroundStyle(.red)
                         case .suspicious:
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                         case .safe:
-                            Image(systemName: tabManager.activeTab?.isSecure == true ? "lock.fill" : "exclamationmark.triangle.fill")
-                                .foregroundStyle(tabManager.activeTab?.isSecure == true ? .green : .orange)
+                            Image(systemName: tabManager.activeTab?.isSecure == true ? "lock.fill" : "globe")
+                                .foregroundStyle(tabManager.activeTab?.isSecure == true ? .green : .secondary)
                         }
                     }
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 18)
+                    .font(.system(size: 12)).frame(width: 16)
+
                     Text(tabManager.activeTab?.url?.host ?? "검색 또는 주소 입력")
-                        .font(.system(size: 15)).foregroundStyle(.primary).lineLimit(1)
+                        .font(.system(size: 14, weight: .medium)).foregroundStyle(.primary).lineLimit(1)
                     Spacer()
+
+                    // 쉴드 배지 (차단 수)
                     if let rpt = tabManager.activeTab?.privacyReport,
                        (rpt.adsBlocked + rpt.trackersBlocked) > 0 {
                         Button { showPrivacy = true } label: {
-                            HStack(spacing: 3) {
-                                Image(systemName: "shield.checkered").font(.system(size: 10, weight: .semibold))
+                            HStack(spacing: 2) {
+                                Image(systemName: "shield.checkered").font(.system(size: 10, weight: .bold))
                                 Text("\(rpt.adsBlocked + rpt.trackersBlocked)")
                                     .font(.system(size: 10, weight: .bold, design: .rounded))
                             }
                             .foregroundStyle(.green)
-                            .padding(.horizontal, 7).padding(.vertical, 3)
-                            .background(.green.opacity(0.12), in: Capsule())
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.green.opacity(0.1), in: Capsule())
                         }
                     }
-                    if tabManager.activeTab?.isLoading == true {
-                        ProgressView().scaleEffect(0.55)
-                    } else if tabManager.activeTab?.url != nil {
-                        // 북마크 버튼 (주소바에 배치)
-                        if let tab = tabManager.activeTab, let url = tab.url {
-                            Button {
-                                container.bookmarkManager.toggleBookmark(title: tab.title, url: url)
-                            } label: {
-                                Image(systemName: container.bookmarkManager.isBookmarked(url: url) ? "star.fill" : "star")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundStyle(container.bookmarkManager.isBookmarked(url: url) ? .yellow : .secondary)
-                            }
-                        }
-                        Button { webViewRef?.reload() } label: {
-                            Image(systemName: "arrow.clockwise").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+
+                    // 북마크 별
+                    if let tab = tabManager.activeTab, let url = tab.url {
+                        Button {
+                            container.bookmarkManager.toggleBookmark(title: tab.title, url: url)
+                        } label: {
+                            Image(systemName: container.bookmarkManager.isBookmarked(url: url) ? "star.fill" : "star")
+                                .font(.system(size: 13)).foregroundStyle(container.bookmarkManager.isBookmarked(url: url) ? .yellow : .secondary)
                         }
                     }
                 }
-                .padding(.horizontal, 14).padding(.vertical, 11)
+                .padding(.horizontal, 12).padding(.vertical, 10)
                 .frame(maxWidth: .infinity)
                 .background(.ultraThinMaterial).clipShape(Capsule())
-                .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+                .shadow(color: .black.opacity(0.05), radius: 3, y: 1)
             }
             .padding(.horizontal, 14).padding(.top, 8)
             } // end isToolbarCompact
@@ -480,7 +480,16 @@ struct BrowserContainerView: View {
             let enc = t.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? t
             guard let u = URL(string: "\(container.settingsStore.searchEngineURL)\(enc)") else { return }; url = u
         }
-        tabManager.activeTab?.url = url; webViewRef?.load(URLRequest(url: url)); addressText = url.absoluteString
+        // ★ 탭 동기화 버그 수정: webViewRef 대신 activeTab.webView 사용
+        // webViewRef는 이전 탭의 WebView를 가리킬 수 있으므로
+        // 반드시 현재 활성 탭의 WebView로 로드
+        tabManager.activeTab?.url = url
+        if let wv = tabManager.activeTab?.webView {
+            wv.load(URLRequest(url: url))
+            webViewRef = wv
+        }
+        // activeTab.webView가 nil이면 (새 탭) → BrowserWebView.makeUIView에서 자동 로드
+        addressText = url.absoluteString
     }
 
     private func closeSearch() {
