@@ -68,7 +68,7 @@ final class RelayManager: @unchecked Sendable {
         // HTTP/3 릴레이 홉 생성
         let relayEndpoint = NWEndpoint.url(url)
         let relayHop = ProxyConfiguration.RelayHop(http3RelayEndpoint: relayEndpoint)
-        let config = ProxyConfiguration(relayHops: [relayHop])
+        var config = ProxyConfiguration(relayHops: [relayHop])
         // ★ 중요: allowFailover = true
         // 릴레이 서버가 실패하면 직접 연결로 대체 → 페이지는 항상 열림
         // (false면 릴레이 실패 시 페이지가 아예 로드 안 됨)
