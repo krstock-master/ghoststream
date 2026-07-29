@@ -499,6 +499,7 @@ enum WebViewConfigurator {
         uc.addUserScript(WKUserScript(source: PrivacyScripts.earlyJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         uc.addUserScript(WKUserScript(source: PrivacyScripts.mainJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
         config.userContentController = uc
+        config.defaultWebpagePreferences.allowsContentJavaScript = true
         // ★ 광고 차단 규칙 적용 (컴파일 완료 여부에 따라)
         if privacyEngine.contentBlocker.isCompiled {
             privacyEngine.contentBlocker.applyCachedRules(to: uc)

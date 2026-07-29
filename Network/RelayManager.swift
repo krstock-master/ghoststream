@@ -68,7 +68,12 @@ final class RelayManager: @unchecked Sendable {
         // HTTP/3 릴레이 홉 생성
         let relayEndpoint = NWEndpoint.url(url)
         let relayHop = ProxyConfiguration.RelayHop(http3RelayEndpoint: relayEndpoint)
-        return ProxyConfiguration(relayHops: [relayHop])
+        let config = ProxyConfiguration(relayHops: [relayHop])
+        // ★ 중요: allowFailover = true
+        // 릴레이 서버가 실패하면 직접 연결로 대체 → 페이지는 항상 열림
+        // (false면 릴레이 실패 시 페이지가 아예 로드 안 됨)
+        config.allowFailover = true
+        return config
     }
 
     /// WebView 설정에 릴레이를 적용합니다.
@@ -82,16 +87,20 @@ final class RelayManager: @unchecked Sendable {
     }
 
     /// 릴레이 연결 상태를 테스트합니다 (IP 확인).
+    /// 릴레이가 실제로 작동하는지 확인하려면 릴레이 IP와 직접 IP를 비교.
     func testConnection() async -> (success: Bool, ip: String?) {
-        guard isEnabled else { return (false, nil) }
         // ipify로 현재 외부 IP 확인
         guard let url = URL(string: "https://api.ipify.org?format=text") else {
             return (false, nil)
         }
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
+            // 캐시 무시하고 최신 IP 조회
+            var request = URLRequest(url: url)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            request.timeoutInterval = 10
+            let (data, _) = try await URLSession.shared.data(for: request)
             let ip = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return (true, ip)
+            return (ip != nil, ip)
         } catch {
             return (false, nil)
         }
