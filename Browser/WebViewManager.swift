@@ -231,6 +231,10 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 return
             }
             let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+            // ★ 프라이버시: 다운로드 이미지의 EXIF/GPS 메타데이터 자동 제거
+            if MetadataScrubber.canScrub(filePath) {
+                MetadataScrubber.scrubImage(at: filePath)
+            }
             NotificationCenter.default.post(name: .downloadCompleted,
                 object: "✅ \(title) 다운로드 완료 (\(sizeStr))")
         } else {
