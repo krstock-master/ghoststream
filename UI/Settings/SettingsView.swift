@@ -16,6 +16,9 @@ struct SettingsView: View {
     @AppStorage("autoDismissCookies") private var autoDismissCookies = true
     @State private var showClearAlert = false
     @State private var profileChanged = false
+    @State private var relayRefresh = UUID()
+    @State private var relayTesting = false
+    @State private var relayTestIP: String?
 
     var body: some View {
         NavigationStack {
@@ -57,6 +60,43 @@ struct SettingsView: View {
                     }
                 } header: { Text("기기 위장") } footer: {
                     Text("웹사이트에 다른 iPhone 모델로 보이게 합니다. 변경 후 새 탭에서 적용됩니다.")
+                }
+
+                // ★ IP 보호 (네트워크 릴레이)
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { RelayManager.shared.isEnabled },
+                        set: { on in
+                            RelayManager.shared.activeProvider = on ? .fastly : .disabled
+                            relayRefresh = UUID()
+                        }
+                    )) {
+                        Label("IP 주소 보호", systemImage: "network.badge.shield.half.filled")
+                    }
+                    if RelayManager.shared.isEnabled {
+                        Button {
+                            relayTesting = true
+                            Task {
+                                let result = await RelayManager.shared.testConnection()
+                                await MainActor.run {
+                                    relayTesting = false
+                                    relayTestIP = result.ip
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                Label("연결 테스트", systemImage: "checkmark.circle")
+                                Spacer()
+                                if relayTesting {
+                                    ProgressView().scaleEffect(0.8)
+                                } else if let ip = relayTestIP {
+                                    Text(ip).font(.caption).foregroundStyle(.green)
+                                }
+                            }
+                        }
+                    }
+                } header: { Text("IP 보호") } footer: {
+                    Text("네트워크 릴레이를 통해 접속하여 웹사이트가 실제 IP를 볼 수 없게 합니다. VPN과 유사하지만 브라우저 트래픽만 보호합니다. iOS 17 이상 필요.")
                 }
 
                 Section {
