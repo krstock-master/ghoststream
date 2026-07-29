@@ -22,6 +22,8 @@ final class DIContainer: @unchecked Sendable {
         self.downloadManager = MediaDownloadManager(vaultManager: vaultManager)
         self.tabManager = TabManager()
         self.bookmarkManager = BookmarkManager()
+        // ★ 광고 차단 규칙 앱 시작 시 즉시 컴파일 (WebView 생성 전에 완료)
+        Task { await contentBlocker.compile() }
     }
 }
 

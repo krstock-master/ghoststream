@@ -50,51 +50,29 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         let host = w.url?.host ?? ""
         guard !reloadPending else {
             reloadPending = false
-            // ★ CF 바이패스 성공 — 핑거프린팅 방어는 재등록하지 않음!
-            // CF 도메인에서 핑거프린팅 방어를 다시 켜면 cf_clearance 만료 시 재챌린지 → 무한 루프
-            // earlyJS(미디어 감지) + mainJS만 재등록
             let uc = w.configuration.userContentController
             uc.removeAllUserScripts()
             uc.addUserScript(WKUserScript(source: PrivacyScripts.earlyJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
             uc.addUserScript(WKUserScript(source: PrivacyScripts.mainJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
             return
         }
-        // ★ handledDomains에 있는 도메인에서 또 CF가 뜨면 → 재처리 허용
-        if handledDomains.contains(host) {
-            // CF 재챌린지 감지 (cf_clearance 만료 시)
-            w.evaluateJavaScript("""
-            (function(){
-                var t = document.title || '';
-                return (t === 'Just a moment...' || !!document.querySelector('#challenge-form,.cf-browser-verification')) ? '1' : '0';
-            })()
-            """) { [weak self, weak w] result, _ in
-                guard let str = result as? String, str == "1",
-                      let self = self, let w = w else { return }
-                // 이전 handledDomains 기록 제거 후 재처리
-                self.handledDomains.remove(host)
-                self.reloadPending = true
-                let uc = w.configuration.userContentController
-                uc.removeAllUserScripts()
-                uc.addUserScript(WKUserScript(source: PrivacyScripts.mainJS, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { w.reload() }
-            }
-            return
-        }
-        // ★ CF 감지 + 핑거프린팅 방어를 하나의 JS 호출로 합침 (속도 최적화)
+        // ★ CF 감지 — 모든 경우 (handledDomains 무관)
+        // 10번 중 1번 루프 원인: handledDomains에 있으면 별도 경로 → 타이밍 이슈
+        // 수정: 단일 경로로 통합
         w.evaluateJavaScript("""
         (function(){
             var t = document.title || '';
-            return (t === 'Just a moment...'
+            var isCF = (t === 'Just a moment...'
                 || t.indexOf('Checking your browser') !== -1
                 || t.indexOf('Attention Required') !== -1
-                || !!document.querySelector('#challenge-form,.cf-browser-verification,#cf-wrapper')
-                || location.hostname === 'challenges.cloudflare.com') ? '1' : '0';
+                || !!document.querySelector('#challenge-form,.cf-browser-verification,#cf-wrapper,.hcaptcha-box')
+                || location.hostname === 'challenges.cloudflare.com');
+            return isCF ? '1' : '0';
         })()
         """) { [weak self, weak w] result, _ in
             guard let self = self, let w = w, let str = result as? String else { return }
             if str == "1" {
-                let domain = w.url?.host ?? ""
-                self.handledDomains.insert(domain)
+                // ★ CF 감지 → handledDomains 상관없이 항상 처리
                 self.reloadPending = true
                 let uc = w.configuration.userContentController
                 uc.removeAllUserScripts()
@@ -106,12 +84,13 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 if DeviceProfileManager.shared.isDesktopMode {
                     w.customUserAgent = DeviceProfileManager.shared.currentProfile.userAgent
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { w.reload() }
-            } else {
-                // ★ 핑거프린팅 방어 즉시 주입 (비CF 페이지)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { w.reload() }
+            } else if !self.handledDomains.contains(host) {
+                // ★ 비CF + 처음 방문 → 핑거프린팅 방어 주입
                 if let fp = self.privacyEngine.fingerprintDefenseScript {
                     w.evaluateJavaScript(fp)
                 }
+                self.handledDomains.insert(host)
             }
         }
     }

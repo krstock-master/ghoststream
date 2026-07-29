@@ -613,22 +613,25 @@ struct NewTabPage: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 28) {
-                Spacer().frame(height: 50)
+            VStack(spacing: 24) {
+                Spacer().frame(height: 60)
 
-                // Logo
-                VStack(spacing: 6) {
-                    Text("\u{1F47B}").font(.system(size: 52))
+                // ★ 미니멀 로고
+                VStack(spacing: 8) {
+                    Image(systemName: "eye.slash.circle.fill")
+                        .font(.system(size: 44))
+                        .foregroundStyle(.teal.opacity(0.8))
                     Text("GhostStream")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .font(.system(size: 22, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.primary.opacity(0.7))
                 }
 
-                // Search bar
-                HStack(spacing: 8) {
+                // ★ 검색 바 (Arc 스타일 — 둥근 필)
+                HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary).font(.system(size: 15))
-                    TextField("검색어 또는 주소 입력", text: $searchText)
-                        .textFieldStyle(.plain).font(.system(size: 16))
+                        .foregroundStyle(.secondary).font(.system(size: 14))
+                    TextField("검색 또는 URL", text: $searchText)
+                        .textFieldStyle(.plain).font(.system(size: 15))
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .focused($isSearchFocused)
@@ -639,62 +642,52 @@ struct NewTabPage: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16).padding(.vertical, 12)
-                .background(Color(.tertiarySystemFill))
-                .clipShape(RoundedRectangle(cornerRadius: 24))
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 16).padding(.vertical, 11)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
+                .padding(.horizontal, 28)
 
-                // ★ Privacy Stats (Brave Shields 스타일)
-                HStack(spacing: 12) {
-                    statCard(
-                        icon: "shield.checkered",
-                        value: "\(privacyEngine.totalTrackersBlocked)",
-                        label: "트래커 차단",
-                        color: .green
-                    )
-                    statCard(
-                        icon: "eye.slash.fill",
-                        value: "\(privacyEngine.totalAdsBlocked)",
-                        label: "광고 차단",
-                        color: .teal
-                    )
-                    statCard(
-                        icon: "fingerprint",
-                        value: "\(privacyEngine.totalFingerprintDefenses)",
-                        label: "핑거프린트 방어",
-                        color: .purple
-                    )
+                // ★ 프라이버시 카드 (글래스)
+                let total = privacyEngine.totalTrackersBlocked + privacyEngine.totalAdsBlocked + privacyEngine.totalFingerprintDefenses
+                if total > 0 {
+                    HStack(spacing: 16) {
+                        Image(systemName: "checkmark.shield.fill")
+                            .font(.system(size: 22)).foregroundStyle(.green)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(total)건 차단").font(.system(size: 16, weight: .bold, design: .rounded))
+                            Text("광고 · 트래커 · 핑거프린팅").font(.system(size: 11)).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(16)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .padding(.horizontal, 20)
                 }
-                .padding(.horizontal, 20)
 
-                // 북마크 (있으면 표시, 없으면 기본 사이트)
-                VStack(alignment: .leading, spacing: 12) {
-                    if !bookmarkManager.bookmarks.isEmpty {
-                        Text("북마크").font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.secondary).padding(.leading, 4)
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 18) {
+                // ★ 빠른 접근 (북마크 또는 기본 사이트)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(bookmarkManager.bookmarks.isEmpty ? "자주 방문" : "북마크")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary).padding(.leading, 4)
+
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 16) {
+                        if !bookmarkManager.bookmarks.isEmpty {
                             ForEach(bookmarkManager.bookmarks.prefix(8)) { bm in
                                 Button { onNavigate(bm.url.absoluteString) } label: {
-                                    VStack(spacing: 8) {
+                                    VStack(spacing: 6) {
                                         ZStack {
-                                            RoundedRectangle(cornerRadius: 14)
-                                                .fill(Color.teal.opacity(0.1))
-                                                .frame(width: 52, height: 52)
+                                            Circle().fill(.ultraThinMaterial).frame(width: 48, height: 48)
                                             Text(String((bm.url.host ?? "?").prefix(1)).uppercased())
-                                                .font(.system(size: 22, weight: .bold, design: .rounded))
+                                                .font(.system(size: 18, weight: .bold, design: .rounded))
                                                 .foregroundStyle(.teal)
                                         }
                                         Text(bm.title.isEmpty ? (bm.url.host ?? "") : bm.title)
-                                            .font(.system(size: 11, weight: .medium))
-                                            .foregroundStyle(.secondary).lineLimit(1)
+                                            .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                                     }
                                 }
                             }
-                        }
-                    } else {
-                        Text("자주 방문").font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.secondary).padding(.leading, 4)
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 18) {
+                        } else {
                             ql("Google", "magnifyingglass", .blue, "https://google.com")
                             ql("YouTube", "play.rectangle.fill", .red, "https://youtube.com")
                             ql("네이버", "n.circle.fill", .green, "https://naver.com")
@@ -703,21 +696,6 @@ struct NewTabPage: View {
                     }
                 }
                 .padding(.horizontal, 20)
-
-                // ★ 삼성 스타일: 프라이버시 요약
-                VStack(spacing: 4) {
-                    let total = privacyEngine.totalTrackersBlocked + privacyEngine.totalAdsBlocked
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.shield.fill").foregroundStyle(.green).font(.system(size: 14))
-                        Text("이번 주 \(total)건의 추적 시도를 차단했습니다")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(.green.opacity(0.08))
-                    .clipShape(Capsule())
-                }
-                .padding(.top, 8)
 
                 Spacer()
             }
