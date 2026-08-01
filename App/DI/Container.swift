@@ -23,7 +23,11 @@ final class DIContainer: @unchecked Sendable {
         self.tabManager = TabManager()
         self.bookmarkManager = BookmarkManager()
         // ★ 광고 차단 규칙 앱 시작 시 즉시 컴파일 (WebView 생성 전에 완료)
-        Task { await contentBlocker.compile() }
+        Task {
+            await contentBlocker.compile()
+            // 원격 필터(대규모 광고 도메인) 백그라운드 다운로드 후 재컴파일
+            await contentBlocker.downloadLatestRules()
+        }
     }
 }
 
