@@ -13,6 +13,8 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     var bookmarkManager: BookmarkManager?
     weak var webView: WKWebView?   // set by BrowserWebView for cookie forwarding
     var downloadObserver: NSObjectProtocol?  // ★ NotificationCenter observer token
+    var lastUserInteraction: TimeInterval = 0  // ★ 사용자 제스처 시각 (납치광고 차단용)
+    static var programmaticNavigationUntil: TimeInterval = 0  // ★ 앱이 직접 시작한 네비게이션 표시
     private var handledDomains: Set<String> = []
     private var reloadPending = false
     private var pendingContextImageURL: URL? // ★ F3: 이미지 꾹 눌러서 저장용
@@ -96,17 +98,66 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     }
     func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
     func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
-    // MARK: - Block App Store redirects (PikPak 등)
-    // 최소한의 차단만 — 기본 동작 유지
+    // MARK: - Redirect Hijack Blocking + App Store scheme blocking
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.allow); return }
         let scheme = url.scheme?.lowercased() ?? ""
-        // 앱 스토어/커스텀 스킴만 차단 (http/https는 항상 허용)
-        if ["itms-apps", "itms-appss", "itms", "intent", "pikpak", "market"].contains(scheme) {
+        // 앱 스토어/커스텀 스킴 차단 (http/https는 계속 검사)
+        if ["itms-apps", "itms-appss", "itms", "intent", "pikpak", "market", "tel", "sms", "mailto"].contains(scheme) {
             decisionHandler(.cancel)
             return
         }
+        guard scheme == "http" || scheme == "https" else { decisionHandler(.cancel); return }
+
+        let currentHost = webView.url?.host ?? ""
+        let targetHost = url.host ?? ""
+
+        // ★ 납치광고 차단의 핵심
+        // navigationType 종류:
+        //   .linkActivated = 사용자가 <a> 링크 클릭 (안전)
+        //   .formSubmitted = 폼 제출 (안전)
+        //   .backForward = 뒤로/앞으로 (안전)
+        //   .reload = 새로고침 (안전)
+        //   .other = JS 네비게이션 (window.location.href = ...) ← 납치광고!
+        let navType = navigationAction.navigationType
+
+        // 메인 프레임 이동만 검사 (iframe 내부는 통과)
+        if navigationAction.targetFrame?.isMainFrame == true {
+            // .other(JS 자동 이동)이고, 사용자 제스처가 없고, 다른 도메인으로 이동하면 차단
+            let isUserInitiated: Bool
+            if #available(iOS 14.5, *) {
+                // navigationAction.buttonNumber 등으로 판단 어려움 → 제스처 시간으로 판단
+                isUserInitiated = (Date().timeIntervalSince1970 - lastUserInteraction) < 1.0
+            } else {
+                isUserInitiated = true
+            }
+
+            let crossDomain = !targetHost.isEmpty && !currentHost.isEmpty &&
+                              !domainsMatch(currentHost, targetHost)
+
+            // 앱이 직접 시작한 네비게이션(주소창 입력, 북마크)은 허용
+            let isProgrammatic = Date().timeIntervalSince1970 < Self.programmaticNavigationUntil
+
+            // JS 자동 이동 + 사용자 제스처 없음 + 다른 도메인 = 납치광고
+            if navType == .other && !isUserInitiated && !isProgrammatic && crossDomain && !currentHost.isEmpty {
+                // 첫 페이지 로드는 currentHost가 있으므로 통과됨 (정상)
+                NotificationCenter.default.post(name: .downloadCompleted,
+                    object: "🛡 리다이렉트 광고 차단: \(targetHost)")
+                decisionHandler(.cancel)
+                return
+            }
+        }
         decisionHandler(.allow)
+    }
+
+    // 도메인이 같은 사이트인지 비교 (서브도메인 허용: m.naver.com == naver.com)
+    private func domainsMatch(_ a: String, _ b: String) -> Bool {
+        func registrable(_ h: String) -> String {
+            let parts = h.split(separator: ".")
+            guard parts.count >= 2 else { return h }
+            return parts.suffix(2).joined(separator: ".")
+        }
+        return registrable(a) == registrable(b)
     }
     // MARK: - Intercept media responses → WKDownload
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
@@ -379,6 +430,9 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         case "privacyEvent":
             if let ev = dict["event"] as? String {
                 switch ev {
+                case "user_gesture":
+                    // ★ 사용자 제스처 시각 기록 (납치광고 차단 판단용)
+                    lastUserInteraction = Date().timeIntervalSince1970
                 case "fingerprint_attempt":
                     tab.privacyReport.fingerprintAttempts += 1
                     privacyEngine.totalFingerprintDefenses += 1

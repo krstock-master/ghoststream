@@ -124,6 +124,7 @@ struct BrowserContainerView: View {
             BookmarkHistoryView { url in
                 tabManager.activeTab?.url = url
                 if let wv = tabManager.activeTab?.webView {
+                    WebViewCoordinator.programmaticNavigationUntil = Date().timeIntervalSince1970 + 2.0
                     wv.load(URLRequest(url: url))
                 }
             }
@@ -485,6 +486,8 @@ struct BrowserContainerView: View {
         // 반드시 현재 활성 탭의 WebView로 로드
         tabManager.activeTab?.url = url
         if let wv = tabManager.activeTab?.webView {
+            // ★ 앱이 직접 시작한 네비게이션 표시 (납치광고 차단이 막지 않도록)
+            WebViewCoordinator.programmaticNavigationUntil = Date().timeIntervalSince1970 + 2.0
             wv.load(URLRequest(url: url))
             webViewRef = wv
         }
