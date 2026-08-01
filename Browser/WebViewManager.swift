@@ -126,8 +126,8 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             // .other(JS 자동 이동)이고, 사용자 제스처가 없고, 다른 도메인으로 이동하면 차단
             let isUserInitiated: Bool
             if #available(iOS 14.5, *) {
-                // navigationAction.buttonNumber 등으로 판단 어려움 → 제스처 시간으로 판단
-                isUserInitiated = (Date().timeIntervalSince1970 - lastUserInteraction) < 1.0
+                // 700ms 이내 사용자 제스처가 있어야 사용자 시작으로 인정
+                isUserInitiated = (Date().timeIntervalSince1970 - lastUserInteraction) < 0.7
             } else {
                 isUserInitiated = true
             }
@@ -146,6 +146,13 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 decisionHandler(.cancel)
                 return
             }
+            // 사용자 제스처가 있어도, 알려진 리다이렉트 광고 도메인 패턴이면 차단
+            if navType == .other && !isProgrammatic && crossDomain && isKnownAdRedirect(targetHost) {
+                NotificationCenter.default.post(name: .downloadCompleted,
+                    object: "🛡 광고 리다이렉트 차단: \(targetHost)")
+                decisionHandler(.cancel)
+                return
+            }
         }
         decisionHandler(.allow)
     }
@@ -158,6 +165,21 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             return parts.suffix(2).joined(separator: ".")
         }
         return registrable(a) == registrable(b)
+    }
+
+    // 알려진 광고 리다이렉트/트래킹 도메인 패턴
+    private func isKnownAdRedirect(_ host: String) -> Bool {
+        let patterns = [
+            "doubleclick", "googlesyndication", "googleadservices", "adnxs",
+            "popads", "popcash", "propellerads", "adsterra", "hilltopads",
+            "clickadu", "exoclick", "juicyads", "trafficjunky", "adservice",
+            "onclickalgo", "onclckds", "clcktrp", "redirectvoluum", "voluum",
+            "go.pdrts", "smartadserver", "adskeeper", "mgid", "revcontent",
+            "trafficstars", "tsyndicate", "adsco.re", "clickadilla", "adav",
+            "bidgear", "adpushup", "admaven", "admngr", "clickndownload"
+        ]
+        let lower = host.lowercased()
+        return patterns.contains { lower.contains($0) }
     }
     // MARK: - Intercept media responses → WKDownload
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
