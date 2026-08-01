@@ -260,9 +260,17 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         }
         NotificationCenter.default.post(name: .downloadFailed, object: msg)
     }
-    // MARK: - New window (target=_blank)
+    // MARK: - New window (target=_blank / window.open)
     func webView(_ w: WKWebView, createWebViewWith c: WKWebViewConfiguration, for a: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if a.targetFrame == nil { w.load(a.request) }; return nil
+        // ★ 팝업 광고 차단
+        // 사용자가 직접 링크를 클릭한 경우(.linkActivated)만 새 탭으로 허용
+        // 스크립트가 자동으로 여는 팝업/팝언더는 무시 (현재 창 하이재킹 방지)
+        if a.navigationType == .linkActivated, let url = a.request.url {
+            // 사용자 클릭 → 새 탭에서 열기
+            NotificationCenter.default.post(name: .openInNewTab, object: url)
+        }
+        // 그 외(자동 팝업)는 완전히 무시 → 현재 창도 유지
+        return nil
     }
     // MARK: - Pull-to-Refresh
     @objc func handlePullToRefresh(_ sender: UIRefreshControl) {
@@ -486,6 +494,8 @@ enum WebViewConfigurator {
         }
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
+        // ★ 팝업 광고 차단: JS가 사용자 클릭 없이 창을 열지 못하게 함
+        config.preferences.javaScriptCanOpenWindowsAutomatically = false
         if #available(iOS 15.4, *) {
             config.preferences.isElementFullscreenEnabled = true
         }
