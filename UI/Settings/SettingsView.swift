@@ -155,6 +155,8 @@ struct SettingsView: View {
                     diagToggle("리다이렉트/팝업 차단", DiagnosticMode.redirectBlockEnabled) { DiagnosticMode.redirectBlockEnabled = $0 }
                     diagToggle("CF 자동 처리", DiagnosticMode.cfHandlingEnabled) { DiagnosticMode.cfHandlingEnabled = $0 }
                     diagToggle("기기 위장 UA", DiagnosticMode.fakeUserAgentEnabled) { DiagnosticMode.fakeUserAgentEnabled = $0 }
+                    diagToggle("네트워크 릴레이(프록시)", DiagnosticMode.relayEnabled) { DiagnosticMode.relayEnabled = $0 }
+                    diagToggle("영구 쿠키 저장", DiagnosticMode.persistentCookiesEnabled) { DiagnosticMode.persistentCookiesEnabled = $0 }
                     if needsRestart {
                         Text("⚠️ 앱을 완전히 종료 후 다시 실행해야 적용됩니다")
                             .font(.caption).foregroundStyle(.orange)

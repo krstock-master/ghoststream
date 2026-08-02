@@ -612,8 +612,8 @@ enum WebViewConfigurator {
     static func makeConfiguration(for tab: Tab, privacyEngine: PrivacyEngine, coordinator: WebViewCoordinator) -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = tab.dataStore
-        // ★ 네트워크 릴레이 (OHTTP) IP 보호 적용
-        if #available(iOS 17.0, *) {
+        // ★ 네트워크 릴레이 — 명시적으로 켠 경우에만 적용
+        if #available(iOS 17.0, *), DiagnosticMode.relayEnabled {
             RelayManager.shared.applyRelay(to: tab.dataStore)
         }
         config.allowsInlineMediaPlayback = true

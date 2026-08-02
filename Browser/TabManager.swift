@@ -34,12 +34,12 @@ final class Tab: Identifiable, @unchecked Sendable {
         self.id = UUID()
         self.isPrivate = isPrivate
         self.url = url
-        // ★ F5 FIX: 일반 탭은 공유 스토어 사용 (CF 쿠키 공유)
-        // 프라이빗 탭만 개별 격리 스토어 사용
+        // 프라이빗 탭: 항상 메모리 전용 (기록 미보존)
+        // 일반 탭: 공유 스토어 사용 (CF clearance 쿠키 보존에 필요)
         if isPrivate {
             self.dataStore = WKWebsiteDataStore.nonPersistent()
         } else {
-            self.dataStore = sharedStore ?? WKWebsiteDataStore.nonPersistent()
+            self.dataStore = sharedStore ?? WKWebsiteDataStore.default()
         }
     }
 
@@ -72,8 +72,13 @@ final class TabManager: @unchecked Sendable {
     // Tab groups
     var groups: [TabGroup] = []
 
-    // ★ F5: 일반 탭 공유 쿠키 스토어 (CF clearance 쿠키 공유)
-    let sharedDataStore = WKWebsiteDataStore.nonPersistent()
+    // ★ 일반 탭 공유 쿠키 스토어
+    // CF clearance 쿠키가 보존되어야 하므로 영구 스토어 사용
+    // (진단 토글로 임시 스토어 전환 가능 — 프라이버시 우선 시)
+    let sharedDataStore: WKWebsiteDataStore = {
+        let usePersistent = UserDefaults.standard.object(forKey: "diag.persistentCookies") as? Bool ?? true
+        return usePersistent ? WKWebsiteDataStore.default() : WKWebsiteDataStore.nonPersistent()
+    }()
 
     var activeTab: Tab? {
         tabs.first { $0.id == activeTabID }

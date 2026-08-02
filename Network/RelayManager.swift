@@ -77,13 +77,14 @@ final class RelayManager: @unchecked Sendable {
     }
 
     /// WebView 설정에 릴레이를 적용합니다.
+    /// ★ 릴레이가 꺼져 있으면 proxyConfigurations를 아예 건드리지 않습니다.
+    ///   (빈 배열을 명시적으로 설정하면 WebKit 네트워크 스택에 영향을 줄 수 있음)
     @available(iOS 17.0, *)
     func applyRelay(to dataStore: WKWebsiteDataStore) {
-        if let proxyConfig = makeProxyConfiguration() {
-            dataStore.proxyConfigurations = [proxyConfig]
-        } else {
-            dataStore.proxyConfigurations = []
+        guard isEnabled, let proxyConfig = makeProxyConfiguration() else {
+            return  // 아무것도 하지 않음 = 순수 기본 네트워크 경로
         }
+        dataStore.proxyConfigurations = [proxyConfig]
     }
 
     /// 릴레이 연결 상태를 테스트합니다 (IP 확인).

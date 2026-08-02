@@ -48,6 +48,18 @@ enum DiagnosticMode {
         set { UserDefaults.standard.set(newValue, forKey: "diag.fakeUA") }
     }
 
+    /// OHTTP 네트워크 릴레이 (프록시)
+    static var relayEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: "diag.relay") as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: "diag.relay") }
+    }
+
+    /// 영구 쿠키 저장 (끄면 nonPersistent = 재시작 시 쿠키 사라짐)
+    static var persistentCookiesEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: "diag.persistentCookies") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "diag.persistentCookies") }
+    }
+
     /// 모든 기능 끄기 (순수 WKWebView 상태)
     static func disableAll() {
         adBlockEnabled = false
@@ -57,6 +69,9 @@ enum DiagnosticMode {
         redirectBlockEnabled = false
         cfHandlingEnabled = false
         fakeUserAgentEnabled = false
+        relayEnabled = false
+        // 영구 쿠키는 켜둠 (CF clearance 보존에 필요)
+        persistentCookiesEnabled = true
     }
 
     /// 모든 기능 켜기 (기본 상태)
@@ -68,6 +83,7 @@ enum DiagnosticMode {
         redirectBlockEnabled = true
         cfHandlingEnabled = true
         fakeUserAgentEnabled = true
+        persistentCookiesEnabled = true
     }
 
     /// 현재 꺼진 기능 목록 (디버그 표시용)
@@ -80,6 +96,8 @@ enum DiagnosticMode {
         if !redirectBlockEnabled { out.append("리다이렉트차단") }
         if !cfHandlingEnabled { out.append("CF자동처리") }
         if !fakeUserAgentEnabled { out.append("UA위장") }
+        if relayEnabled { out.append("릴레이ON") }
+        if !persistentCookiesEnabled { out.append("임시쿠키") }
         return out
     }
 }
