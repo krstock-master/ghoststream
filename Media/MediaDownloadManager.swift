@@ -197,7 +197,7 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
 
         let hlsTask = Task {
             do {
-                let ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+                let ua = DeviceProfileManager.shared.activeProfile.userAgent
 
                 // Step 1: Download the m3u8 playlist
                 var request = URLRequest(url: dl.media.url)
