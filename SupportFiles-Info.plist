@@ -61,7 +61,10 @@
     <string>GhostStream은 사용자를 추적하지 않습니다.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
-        <key>NSAllowsArbitraryLoads</key>
+        <!-- ATS 기본값 유지 (TLS 1.2+ 강제) → Safari와 동일한 TLS 협상 프로파일
+             CF는 JA3/JA4 TLS 지문을 검사하므로 ATS를 끄면 Safari와 달라짐.
+             HTTP 사이트는 웹 콘텐츠 예외로만 허용 -->
+        <key>NSAllowsArbitraryLoadsInWebContent</key>
         <true/>
     </dict>
     <key>BGTaskSchedulerPermittedIdentifiers</key>
