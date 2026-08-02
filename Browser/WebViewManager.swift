@@ -15,6 +15,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     var downloadObserver: NSObjectProtocol?  // ★ NotificationCenter observer token
     var rulesObserver: NSObjectProtocol?  // ★ 광고 규칙 재적용 observer
     var lastUserInteraction: TimeInterval = 0  // ★ 사용자 제스처 시각 (납치광고 차단용)
+    var cfChallengeActive: Bool = false  // ★ CF 챌린지 진행 중 (리다이렉트 차단 해제)
     static var programmaticNavigationUntil: TimeInterval = 0  // ★ 앱이 직접 시작한 네비게이션 표시
     private var handledDomains: Set<String> = []
     private var reloadPending = false
@@ -90,10 +91,11 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             guard let self = self, let w = w, let str = result as? String else { return }
             if str == "verifying" {
                 // ★ CF가 정상 검증 중 → 아무것도 하지 않고 완료를 기다림
-                // (reload를 걸면 검증이 중단되어 무한 루프)
+                self.cfChallengeActive = true
                 return
             }
             if str == "1" {
+                self.cfChallengeActive = true
                 // ★ CF 감지 → handledDomains 상관없이 항상 처리
                 self.reloadPending = true
                 let uc = w.configuration.userContentController
@@ -107,13 +109,17 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                     w.customUserAgent = DeviceProfileManager.shared.currentProfile.userAgent
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { w.reload() }
-            } else if !self.handledDomains.contains(host) {
-                // ★ 비CF + 처음 방문 → 핑거프린팅 방어 주입 (진단 토글)
-                if DiagnosticMode.fingerprintDefenseEnabled,
-                   let fp = self.privacyEngine.fingerprintDefenseScript {
-                    w.evaluateJavaScript(fp)
+            } else {
+                // ★ CF 아닌 정상 페이지 도달 → 챌린지 종료
+                self.cfChallengeActive = false
+                if !self.handledDomains.contains(host) {
+                    // 비CF + 처음 방문 → 핑거프린팅 방어 주입 (진단 토글)
+                    if DiagnosticMode.fingerprintDefenseEnabled,
+                       let fp = self.privacyEngine.fingerprintDefenseScript {
+                        w.evaluateJavaScript(fp)
+                    }
+                    self.handledDomains.insert(host)
                 }
-                self.handledDomains.insert(host)
             }
         }
     }
@@ -152,7 +158,11 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         let navType = navigationAction.navigationType
 
         // 메인 프레임 이동만 검사 (iframe 내부는 통과)
-        if DiagnosticMode.redirectBlockEnabled, navigationAction.targetFrame?.isMainFrame == true {
+        // ★ CF 챌린지 진행 중에는 리다이렉트 차단을 완전히 끔
+        //   CF는 통과 후 .other 타입 + 제스처 없이 원래 사이트로 이동시키므로
+        //   차단 조건에 걸려 무한 반복됨
+        if DiagnosticMode.redirectBlockEnabled, !cfChallengeActive,
+           navigationAction.targetFrame?.isMainFrame == true {
             // .other(JS 자동 이동)이고, 사용자 제스처가 없고, 다른 도메인으로 이동하면 차단
             let isUserInitiated: Bool
             if #available(iOS 14.5, *) {
@@ -620,8 +630,9 @@ enum WebViewConfigurator {
         config.mediaTypesRequiringUserActionForPlayback = []
         // ★ UA에 앱 이름이 붙지 않도록 (CF가 비-Safari 앱으로 인식하는 것 방지)
         config.applicationNameForUserAgent = "Version/\(UIDevice.current.systemVersion) Mobile/15E148 Safari/604.1"
-        // ★ 팝업 광고 차단 (진단 토글)
-        config.preferences.javaScriptCanOpenWindowsAutomatically = !DiagnosticMode.redirectBlockEnabled
+        // ★ CF 챌린지가 창을 열어야 할 수 있으므로 기본값 유지
+        //   (v1.7.3에서 false로 바꾼 것이 CF 검증을 방해했음)
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
         if #available(iOS 15.4, *) {
             config.preferences.isElementFullscreenEnabled = true
         }
