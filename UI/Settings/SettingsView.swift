@@ -37,10 +37,10 @@ struct SettingsView: View {
                     }
                 } header: { Text("프라이버시 & 보안") } footer: { Text("광고, 트래커, 핑거프린팅을 차단합니다.") }
 
-                // ★ 기기 위장 (DeviceProfile)
+                // ★ 화면 정보 위장 (UA는 CF 호환을 위해 실제 값 사용)
                 Section {
                     HStack {
-                        Label("현재 기기", systemImage: "iphone.gen3"); Spacer()
+                        Label("화면 프로필", systemImage: "iphone.gen3"); Spacer()
                         Text(DeviceProfileManager.shared.activeProfile.name)
                             .foregroundStyle(.teal).font(.subheadline)
                     }
@@ -53,7 +53,7 @@ struct SettingsView: View {
                         }
                     } label: {
                         HStack {
-                            Label("다른 기기로 변경", systemImage: "arrow.triangle.2.circlepath")
+                            Label("다른 프로필로 변경", systemImage: "arrow.triangle.2.circlepath")
                             Spacer()
                             if profileChanged {
                                 Text("✅ \(DeviceProfileManager.shared.activeProfile.name)")
@@ -62,7 +62,7 @@ struct SettingsView: View {
                         }
                     }
                 } header: { Text("기기 위장") } footer: {
-                    Text("웹사이트에 다른 iPhone 모델로 보이게 합니다. 변경 후 새 탭에서 적용됩니다.")
+                    Text("화면 크기·하드웨어 정보를 다른 iPhone처럼 보이게 합니다. 브라우저 버전(UA)은 보안 확인(Cloudflare) 호환을 위해 실제 값을 사용합니다.")
                 }
 
                 // ★ IP 보호 (네트워크 릴레이)

@@ -38,13 +38,15 @@ enum DiagnosticMode {
 
     /// CF 자동 처리 (감지 후 스크립트 제거 + reload)
     static var cfHandlingEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: "diag.cfHandling") as? Bool ?? true }
+        // ★ 기본 OFF — CF 챌린지 진행 중 스크립트 제거+reload가 검증을 중단시킴
+        get { UserDefaults.standard.object(forKey: "diag.cfHandling") as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: "diag.cfHandling") }
     }
 
     /// 기기 위장 UA
     static var fakeUserAgentEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: "diag.fakeUA") as? Bool ?? true }
+        // ★ 기본 OFF — CF가 UA와 실제 엔진을 대조하므로 위장이 봇 신호가 됨
+        get { UserDefaults.standard.object(forKey: "diag.fakeUA") as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: "diag.fakeUA") }
     }
 
@@ -58,6 +60,18 @@ enum DiagnosticMode {
     static var persistentCookiesEnabled: Bool {
         get { UserDefaults.standard.object(forKey: "diag.persistentCookies") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "diag.persistentCookies") }
+    }
+
+    /// 앱 시작 시 1회 실행 — CF를 방해하는 기능을 강제로 끔
+    /// (기존 사용자는 UserDefaults에 true가 저장되어 있어 기본값이 적용되지 않음)
+    static func applyCFSafetyMigration() {
+        let key = "diag.cfSafetyMigration.v1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        cfHandlingEnabled = false
+        fakeUserAgentEnabled = false
+        relayEnabled = false
+        persistentCookiesEnabled = true
+        UserDefaults.standard.set(true, forKey: key)
     }
 
     /// 모든 기능 끄기 (순수 WKWebView 상태)
@@ -81,8 +95,9 @@ enum DiagnosticMode {
         fingerprintDefenseEnabled = true
         contentScriptsEnabled = true
         redirectBlockEnabled = true
-        cfHandlingEnabled = true
-        fakeUserAgentEnabled = true
+        // CF 안정성을 위해 아래 두 기능은 켜지 않음
+        cfHandlingEnabled = false
+        fakeUserAgentEnabled = false
         persistentCookiesEnabled = true
     }
 
