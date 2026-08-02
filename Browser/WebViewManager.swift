@@ -138,8 +138,14 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             // 앱이 직접 시작한 네비게이션(주소창 입력, 북마크)은 허용
             let isProgrammatic = Date().timeIntervalSince1970 < Self.programmaticNavigationUntil
 
+            // ★ CF/인프라 도메인은 리다이렉트 차단에서 제외 (정당한 챌린지 이동)
+            let infraHosts = ["cloudflare.com", "challenges.cloudflare.com", "hcaptcha.com",
+                              "recaptcha.net", "google.com", "gstatic.com", "cf-ipv6.com"]
+            let isInfra = infraHosts.contains { targetHost.hasSuffix($0) } ||
+                          infraHosts.contains { currentHost.hasSuffix($0) }
+
             // JS 자동 이동 + 사용자 제스처 없음 + 다른 도메인 = 납치광고
-            if navType == .other && !isUserInitiated && !isProgrammatic && crossDomain && !currentHost.isEmpty {
+            if navType == .other && !isUserInitiated && !isProgrammatic && crossDomain && !currentHost.isEmpty && !isInfra {
                 // 첫 페이지 로드는 currentHost가 있으므로 통과됨 (정상)
                 NotificationCenter.default.post(name: .downloadCompleted,
                     object: "🛡 리다이렉트 광고 차단: \(targetHost)")
@@ -147,7 +153,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 return
             }
             // 사용자 제스처가 있어도, 알려진 리다이렉트 광고 도메인 패턴이면 차단
-            if navType == .other && !isProgrammatic && crossDomain && isKnownAdRedirect(targetHost) {
+            if navType == .other && !isProgrammatic && crossDomain && !isInfra && isKnownAdRedirect(targetHost) {
                 NotificationCenter.default.post(name: .downloadCompleted,
                     object: "🛡 광고 리다이렉트 차단: \(targetHost)")
                 decisionHandler(.cancel)
