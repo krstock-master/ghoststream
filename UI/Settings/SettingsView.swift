@@ -12,6 +12,7 @@ struct SettingsView: View {
     @AppStorage("autoLockVault") private var autoLockVault = true
     @AppStorage("searchEngine") private var searchEngine = "DuckDuckGo"
     @AppStorage("appTheme") private var appTheme = "system"
+    @AppStorage("clearOnExit") private var clearOnExit = false
     @AppStorage("addressBarPosition") private var addressBarBottom = true
     @AppStorage("autoDismissCookies") private var autoDismissCookies = true
     @State private var showClearAlert = false
@@ -126,10 +127,15 @@ struct SettingsView: View {
                 } header: { Text("검색 & 브라우저") }
 
                 Section {
+                    Toggle(isOn: $clearOnExit) {
+                        Label("앱 종료 시 자동 삭제", systemImage: "clock.arrow.circlepath")
+                    }
                     Button(role: .destructive) { showClearAlert = true } label: {
                         Label("브라우징 데이터 삭제", systemImage: "trash").foregroundStyle(.red)
                     }
-                } header: { Text("데이터 관리") } footer: { Text("쿠키, 캐시를 삭제합니다. 다운로드 파일은 유지.") }
+                } header: { Text("데이터 관리") } footer: {
+                    Text("쿠키, 캐시를 삭제합니다. 다운로드 파일은 유지됩니다. 자동 삭제를 켜면 앱을 나갈 때마다 쿠키가 지워지지만, 로그인과 보안 확인(Cloudflare)을 매번 다시 해야 합니다.")
+                }
 
                 // ★ 진단 모드 — CF 문제 원인 격리용
                 Section {
@@ -232,7 +238,7 @@ struct PrivacyPolicyView: View {
                 policyItem("2", "서버리스", "자체 서버 없음. 사용자 데이터 미수집.")
                 policyItem("3", "SDK 제로", "Firebase, Facebook SDK 등 미사용.")
                 policyItem("4", "최소 권한", "카메라, 연락처, 위치 권한 미요청.")
-                policyItem("5", "탭 격리", "각 탭의 쿠키는 서로 격리됩니다.")
+                policyItem("5", "프라이빗 탭 격리", "프라이빗 탭은 메모리에만 저장되어 닫으면 사라집니다. 일반 탭은 로그인 유지를 위해 쿠키를 공유하며, Fire 버튼으로 언제든 삭제할 수 있습니다.")
                 policyItem("6", "AES-256 암호화", "보안 폴더 파일은 AES-256-GCM 암호화.")
             }.padding()
         }.navigationTitle("개인정보처리방침").navigationBarTitleDisplayMode(.inline)

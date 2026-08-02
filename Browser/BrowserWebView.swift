@@ -35,9 +35,10 @@ struct BrowserWebView: UIViewRepresentable {
                 guard let media = n.object as? DetectedMedia, let coord = coord else { return }
                 coord.startWKDownload(url: media.url, title: media.title)
             }
-            // ★ 재사용 WebView에도 최신 광고 규칙 적용
+            // ★ 재사용 WebView에도 최신 광고 규칙 적용 (진단 토글 준수)
             let uc = existing.configuration.userContentController
             let blocker = privacyEngine.contentBlocker
+            guard DiagnosticMode.adBlockEnabled else { return existing }
             if blocker.isCompiled {
                 uc.removeAllContentRuleLists()
                 blocker.applyCachedRules(to: uc)
