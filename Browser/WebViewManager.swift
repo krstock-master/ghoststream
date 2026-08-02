@@ -129,86 +129,20 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.allow); return }
         let scheme = url.scheme?.lowercased() ?? ""
-        // 앱 스토어/커스텀 스킴 차단 (http/https는 계속 검사)
-        // 앱 스토어 강제 이동만 차단 (tel/sms/mailto는 정상 기능이므로 허용)
+        // 앱 스토어 강제 이동만 차단
         if ["itms-apps", "itms-appss", "itms", "intent", "pikpak", "market"].contains(scheme) {
             decisionHandler(.cancel)
             return
         }
-        // tel/sms/mailto 등은 시스템이 처리하도록 허용
+        // tel/sms/mailto 등은 시스템이 처리
         if ["tel", "sms", "mailto", "facetime"].contains(scheme) {
-            if let u = navigationAction.request.url {
-                UIApplication.shared.open(u, options: [:], completionHandler: nil)
-            }
+            UIApplication.shared.open(url, options: [:], completionHandler: nil)
             decisionHandler(.cancel)
             return
         }
-        guard scheme == "http" || scheme == "https" else { decisionHandler(.cancel); return }
-
-        let currentHost = webView.url?.host ?? ""
-        let targetHost = url.host ?? ""
-
-        // ★ 납치광고 차단의 핵심
-        // navigationType 종류:
-        //   .linkActivated = 사용자가 <a> 링크 클릭 (안전)
-        //   .formSubmitted = 폼 제출 (안전)
-        //   .backForward = 뒤로/앞으로 (안전)
-        //   .reload = 새로고침 (안전)
-        //   .other = JS 네비게이션 (window.location.href = ...) ← 납치광고!
-        let navType = navigationAction.navigationType
-
-        // 메인 프레임 이동만 검사 (iframe 내부는 통과)
-        // ★ CF 챌린지 진행 중에는 리다이렉트 차단을 완전히 끔
-        //   CF는 통과 후 .other 타입 + 제스처 없이 원래 사이트로 이동시키므로
-        //   차단 조건에 걸려 무한 반복됨
-        if DiagnosticMode.redirectBlockEnabled, !cfChallengeActive,
-           navigationAction.targetFrame?.isMainFrame == true {
-            // .other(JS 자동 이동)이고, 사용자 제스처가 없고, 다른 도메인으로 이동하면 차단
-            let isUserInitiated: Bool
-            if #available(iOS 14.5, *) {
-                // 2.5초 이내 사용자 제스처 → 사용자 시작으로 인정
-                // (결제/로그인 등 느린 리다이렉트 체인을 막지 않도록 여유 있게)
-                isUserInitiated = (Date().timeIntervalSince1970 - lastUserInteraction) < 2.5
-            } else {
-                isUserInitiated = true
-            }
-
-            let crossDomain = !targetHost.isEmpty && !currentHost.isEmpty &&
-                              !domainsMatch(currentHost, targetHost)
-
-            // 앱이 직접 시작한 네비게이션(주소창 입력, 북마크)은 허용
-            let isProgrammatic = Date().timeIntervalSince1970 < Self.programmaticNavigationUntil
-
-            // ★ CF/인프라/인증/결제 도메인은 리다이렉트 차단에서 제외
-            let infraHosts = ["cloudflare.com", "challenges.cloudflare.com", "hcaptcha.com",
-                              "recaptcha.net", "google.com", "gstatic.com", "cf-ipv6.com",
-                              // 로그인/인증
-                              "kakao.com", "naver.com", "apple.com", "facebook.com",
-                              "accounts.google.com", "appleid.apple.com", "line.me",
-                              // 결제 (한국 PG/간편결제)
-                              "tosspayments.com", "inicis.com", "nicepay.co.kr", "kcp.co.kr",
-                              "paypal.com", "stripe.com", "kakaopay.com", "payco.com",
-                              // 본인인증
-                              "danal.co.kr", "ok-name.co.kr", "vno.co.kr", "mobile-ok.com"]
-            let isInfra = infraHosts.contains { targetHost.hasSuffix($0) } ||
-                          infraHosts.contains { currentHost.hasSuffix($0) }
-
-            // JS 자동 이동 + 사용자 제스처 없음 + 다른 도메인 = 납치광고
-            if navType == .other && !isUserInitiated && !isProgrammatic && crossDomain && !currentHost.isEmpty && !isInfra {
-                // 첫 페이지 로드는 currentHost가 있으므로 통과됨 (정상)
-                NotificationCenter.default.post(name: .downloadCompleted,
-                    object: "🛡 리다이렉트 광고 차단: \(targetHost)")
-                decisionHandler(.cancel)
-                return
-            }
-            // 사용자 제스처가 있어도, 알려진 리다이렉트 광고 도메인 패턴이면 차단
-            if navType == .other && !isProgrammatic && crossDomain && !isInfra && isKnownAdRedirect(targetHost) {
-                NotificationCenter.default.post(name: .downloadCompleted,
-                    object: "🛡 광고 리다이렉트 차단: \(targetHost)")
-                decisionHandler(.cancel)
-                return
-            }
-        }
+        // ★ http/https는 항상 허용 (v1.7.2 동작 복원)
+        //   여기서 리다이렉트를 판정하면 CF 챌린지 통과 이동까지 막혀
+        //   무한 루프가 발생한다. 납치광고는 createWebViewWith에서만 처리.
         decisionHandler(.allow)
     }
 
@@ -390,17 +324,13 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     }
     // MARK: - New window (target=_blank / window.open)
     func webView(_ w: WKWebView, createWebViewWith c: WKWebViewConfiguration, for a: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        // 진단 모드에서 리다이렉트 차단이 꺼져 있으면 기본 동작(새 탭)
-        guard DiagnosticMode.redirectBlockEnabled else {
-            if let url = a.request.url {
-                NotificationCenter.default.post(name: .openInNewTab, object: url)
-            }
-            return nil
-        }
-        // ★ 팝업 광고 차단
+        // ★ v1.7.2 동작 복원 — CF가 창을 여는 경우를 막지 않음
+        // 사용자 클릭이면 새 탭, 그 외에는 현재 창에서 처리
         if a.navigationType == .linkActivated, let url = a.request.url {
             NotificationCenter.default.post(name: .openInNewTab, object: url)
+            return nil
         }
+        if a.targetFrame == nil { w.load(a.request) }
         return nil
     }
     // MARK: - Pull-to-Refresh
