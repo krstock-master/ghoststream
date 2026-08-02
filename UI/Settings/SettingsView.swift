@@ -19,6 +19,8 @@ struct SettingsView: View {
     @State private var relayRefresh = UUID()
     @State private var relayTesting = false
     @State private var relayTestIP: String?
+    @State private var diagRefresh = UUID()
+    @State private var needsRestart = false
 
     var body: some View {
         NavigationStack {
@@ -129,6 +131,38 @@ struct SettingsView: View {
                     }
                 } header: { Text("데이터 관리") } footer: { Text("쿠키, 캐시를 삭제합니다. 다운로드 파일은 유지.") }
 
+                // ★ 진단 모드 — CF 문제 원인 격리용
+                Section {
+                    Button {
+                        DiagnosticMode.disableAll()
+                        diagRefresh = UUID()
+                        needsRestart = true
+                    } label: {
+                        Label("모든 기능 끄기 (순수 브라우저)", systemImage: "power")
+                            .foregroundStyle(.orange)
+                    }
+                    Button {
+                        DiagnosticMode.enableAll()
+                        diagRefresh = UUID()
+                        needsRestart = true
+                    } label: {
+                        Label("모든 기능 켜기 (기본)", systemImage: "checkmark.circle")
+                    }
+                    diagToggle("광고/트래커 차단", DiagnosticMode.adBlockEnabled) { DiagnosticMode.adBlockEnabled = $0 }
+                    diagToggle("제3자 쿠키 차단", DiagnosticMode.cookieBlockEnabled) { DiagnosticMode.cookieBlockEnabled = $0 }
+                    diagToggle("핑거프린팅 방어", DiagnosticMode.fingerprintDefenseEnabled) { DiagnosticMode.fingerprintDefenseEnabled = $0 }
+                    diagToggle("콘텐츠 스크립트", DiagnosticMode.contentScriptsEnabled) { DiagnosticMode.contentScriptsEnabled = $0 }
+                    diagToggle("리다이렉트/팝업 차단", DiagnosticMode.redirectBlockEnabled) { DiagnosticMode.redirectBlockEnabled = $0 }
+                    diagToggle("CF 자동 처리", DiagnosticMode.cfHandlingEnabled) { DiagnosticMode.cfHandlingEnabled = $0 }
+                    diagToggle("기기 위장 UA", DiagnosticMode.fakeUserAgentEnabled) { DiagnosticMode.fakeUserAgentEnabled = $0 }
+                    if needsRestart {
+                        Text("⚠️ 앱을 완전히 종료 후 다시 실행해야 적용됩니다")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                } header: { Text("진단 모드") } footer: {
+                    Text("CF(보안 확인) 문제 원인을 찾기 위한 기능입니다. '모든 기능 끄기' 후 앱을 재시작하고 CF 사이트를 테스트하세요. 통과되면 기능을 하나씩 켜가며 범인을 찾을 수 있습니다.")
+                }
+
                 Section {
                     HStack {
                         Label("버전", systemImage: "info.circle"); Spacer()
@@ -145,6 +179,15 @@ struct SettingsView: View {
                 Button("삭제", role: .destructive) { clearBrowsingData() }
                 Button("취소", role: .cancel) {}
             } message: { Text("쿠키, 캐시, 로컬 스토리지가 삭제됩니다.") }
+        }
+    }
+
+    private func diagToggle(_ title: String, _ value: Bool, _ setter: @escaping (Bool) -> Void) -> some View {
+        Toggle(isOn: Binding(
+            get: { value },
+            set: { setter($0); diagRefresh = UUID(); needsRestart = true }
+        )) {
+            Text(title).font(.subheadline)
         }
     }
 

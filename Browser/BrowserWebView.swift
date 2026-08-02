@@ -59,7 +59,9 @@ struct BrowserWebView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
-        webView.customUserAgent = DeviceProfileManager.shared.activeProfile.userAgent
+        if DiagnosticMode.fakeUserAgentEnabled {
+            webView.customUserAgent = DeviceProfileManager.shared.activeProfile.userAgent
+        }
         context.coordinator.downloadManager = downloadManager
         context.coordinator.bookmarkManager = bookmarkManager
         context.coordinator.observeWebView(webView)

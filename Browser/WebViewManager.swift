@@ -51,6 +51,14 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             }
         }
         let host = w.url?.host ?? ""
+        // ★ 진단: CF 자동 처리 꺼짐 → 아무것도 하지 않음 (순수 브라우징)
+        guard DiagnosticMode.cfHandlingEnabled else {
+            if DiagnosticMode.fingerprintDefenseEnabled, !handledDomains.contains(host) {
+                if let fp = privacyEngine.fingerprintDefenseScript { w.evaluateJavaScript(fp) }
+                handledDomains.insert(host)
+            }
+            return
+        }
         guard !reloadPending else {
             reloadPending = false
             let uc = w.configuration.userContentController
@@ -100,8 +108,9 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { w.reload() }
             } else if !self.handledDomains.contains(host) {
-                // ★ 비CF + 처음 방문 → 핑거프린팅 방어 주입
-                if let fp = self.privacyEngine.fingerprintDefenseScript {
+                // ★ 비CF + 처음 방문 → 핑거프린팅 방어 주입 (진단 토글)
+                if DiagnosticMode.fingerprintDefenseEnabled,
+                   let fp = self.privacyEngine.fingerprintDefenseScript {
                     w.evaluateJavaScript(fp)
                 }
                 self.handledDomains.insert(host)
@@ -143,7 +152,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         let navType = navigationAction.navigationType
 
         // 메인 프레임 이동만 검사 (iframe 내부는 통과)
-        if navigationAction.targetFrame?.isMainFrame == true {
+        if DiagnosticMode.redirectBlockEnabled, navigationAction.targetFrame?.isMainFrame == true {
             // .other(JS 자동 이동)이고, 사용자 제스처가 없고, 다른 도메인으로 이동하면 차단
             let isUserInitiated: Bool
             if #available(iOS 14.5, *) {
@@ -371,14 +380,17 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     }
     // MARK: - New window (target=_blank / window.open)
     func webView(_ w: WKWebView, createWebViewWith c: WKWebViewConfiguration, for a: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        // 진단 모드에서 리다이렉트 차단이 꺼져 있으면 기본 동작(새 탭)
+        guard DiagnosticMode.redirectBlockEnabled else {
+            if let url = a.request.url {
+                NotificationCenter.default.post(name: .openInNewTab, object: url)
+            }
+            return nil
+        }
         // ★ 팝업 광고 차단
-        // 사용자가 직접 링크를 클릭한 경우(.linkActivated)만 새 탭으로 허용
-        // 스크립트가 자동으로 여는 팝업/팝언더는 무시 (현재 창 하이재킹 방지)
         if a.navigationType == .linkActivated, let url = a.request.url {
-            // 사용자 클릭 → 새 탭에서 열기
             NotificationCenter.default.post(name: .openInNewTab, object: url)
         }
-        // 그 외(자동 팝업)는 완전히 무시 → 현재 창도 유지
         return nil
     }
     // MARK: - Pull-to-Refresh
@@ -606,8 +618,8 @@ enum WebViewConfigurator {
         }
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
-        // ★ 팝업 광고 차단: JS가 사용자 클릭 없이 창을 열지 못하게 함
-        config.preferences.javaScriptCanOpenWindowsAutomatically = false
+        // ★ 팝업 광고 차단 (진단 토글)
+        config.preferences.javaScriptCanOpenWindowsAutomatically = !DiagnosticMode.redirectBlockEnabled
         if #available(iOS 15.4, *) {
             config.preferences.isElementFullscreenEnabled = true
         }
@@ -615,27 +627,26 @@ enum WebViewConfigurator {
         for name in ["mediaFound","alohaDownload","downloadVideo","blobCapture","elementHidden","privacyEvent"] {
             uc.add(coordinator, name: name)
         }
-        // ★ 핑거프린팅 방어는 makeConfiguration에서 추가하지 않음
-        // → didFinish에서 CF가 아닌 페이지에만 evaluateJavaScript로 주입
-        // → CF 도메인에서는 절대 실행되지 않아 무한 루프 방지
-        uc.addUserScript(WKUserScript(source: PrivacyScripts.earlyJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
-        uc.addUserScript(WKUserScript(source: PrivacyScripts.mainJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+        // ★ 콘텐츠 스크립트 (진단 토글)
+        if DiagnosticMode.contentScriptsEnabled {
+            uc.addUserScript(WKUserScript(source: PrivacyScripts.earlyJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+            uc.addUserScript(WKUserScript(source: PrivacyScripts.mainJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+        }
         config.userContentController = uc
         config.defaultWebpagePreferences.allowsContentJavaScript = true
-        // ★ 광고 차단 규칙 적용
-        // isCompiled면 즉시, 아니면 컴파일 완료 알림을 기다림
-        if privacyEngine.contentBlocker.isCompiled {
-            privacyEngine.contentBlocker.applyCachedRules(to: uc)
-        }
-        // ★ 컴파일 완료(또는 원격 필터 로드 완료) 시 규칙 재적용
-        // 이미 생성된 WebView에도 최신 규칙이 반영되도록 함
+        // ★ 광고 차단 규칙 (진단 토글)
         let blocker = privacyEngine.contentBlocker
-        coordinator.rulesObserver = NotificationCenter.default.addObserver(
-            forName: Notification.Name("gsContentRulesCompiled"), object: nil, queue: .main
-        ) { [weak uc] _ in
-            guard let uc = uc else { return }
-            uc.removeAllContentRuleLists()
-            blocker.applyCachedRules(to: uc)
+        if DiagnosticMode.adBlockEnabled {
+            if blocker.isCompiled {
+                blocker.applyCachedRules(to: uc)
+            }
+            coordinator.rulesObserver = NotificationCenter.default.addObserver(
+                forName: Notification.Name("gsContentRulesCompiled"), object: nil, queue: .main
+            ) { [weak uc] _ in
+                guard let uc = uc else { return }
+                uc.removeAllContentRuleLists()
+                blocker.applyCachedRules(to: uc)
+            }
         }
         return config
     }
