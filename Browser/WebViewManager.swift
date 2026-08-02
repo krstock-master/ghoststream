@@ -618,6 +618,8 @@ enum WebViewConfigurator {
         }
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
+        // ★ UA에 앱 이름이 붙지 않도록 (CF가 비-Safari 앱으로 인식하는 것 방지)
+        config.applicationNameForUserAgent = "Version/\(UIDevice.current.systemVersion) Mobile/15E148 Safari/604.1"
         // ★ 팝업 광고 차단 (진단 토글)
         config.preferences.javaScriptCanOpenWindowsAutomatically = !DiagnosticMode.redirectBlockEnabled
         if #available(iOS 15.4, *) {
