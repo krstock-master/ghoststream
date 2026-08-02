@@ -13,6 +13,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     var bookmarkManager: BookmarkManager?
     weak var webView: WKWebView?   // set by BrowserWebView for cookie forwarding
     var downloadObserver: NSObjectProtocol?  // ★ NotificationCenter observer token
+    var rulesObserver: NSObjectProtocol?  // ★ 광고 규칙 재적용 observer
     var lastUserInteraction: TimeInterval = 0  // ★ 사용자 제스처 시각 (납치광고 차단용)
     static var programmaticNavigationUntil: TimeInterval = 0  // ★ 앱이 직접 시작한 네비게이션 표시
     private var handledDomains: Set<String> = []
@@ -103,7 +104,16 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         guard let url = navigationAction.request.url else { decisionHandler(.allow); return }
         let scheme = url.scheme?.lowercased() ?? ""
         // 앱 스토어/커스텀 스킴 차단 (http/https는 계속 검사)
-        if ["itms-apps", "itms-appss", "itms", "intent", "pikpak", "market", "tel", "sms", "mailto"].contains(scheme) {
+        // 앱 스토어 강제 이동만 차단 (tel/sms/mailto는 정상 기능이므로 허용)
+        if ["itms-apps", "itms-appss", "itms", "intent", "pikpak", "market"].contains(scheme) {
+            decisionHandler(.cancel)
+            return
+        }
+        // tel/sms/mailto 등은 시스템이 처리하도록 허용
+        if ["tel", "sms", "mailto", "facetime"].contains(scheme) {
+            if let u = navigationAction.request.url {
+                UIApplication.shared.open(u, options: [:], completionHandler: nil)
+            }
             decisionHandler(.cancel)
             return
         }
@@ -126,8 +136,9 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             // .other(JS 자동 이동)이고, 사용자 제스처가 없고, 다른 도메인으로 이동하면 차단
             let isUserInitiated: Bool
             if #available(iOS 14.5, *) {
-                // 700ms 이내 사용자 제스처가 있어야 사용자 시작으로 인정
-                isUserInitiated = (Date().timeIntervalSince1970 - lastUserInteraction) < 0.7
+                // 2.5초 이내 사용자 제스처 → 사용자 시작으로 인정
+                // (결제/로그인 등 느린 리다이렉트 체인을 막지 않도록 여유 있게)
+                isUserInitiated = (Date().timeIntervalSince1970 - lastUserInteraction) < 2.5
             } else {
                 isUserInitiated = true
             }
@@ -138,9 +149,17 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             // 앱이 직접 시작한 네비게이션(주소창 입력, 북마크)은 허용
             let isProgrammatic = Date().timeIntervalSince1970 < Self.programmaticNavigationUntil
 
-            // ★ CF/인프라 도메인은 리다이렉트 차단에서 제외 (정당한 챌린지 이동)
+            // ★ CF/인프라/인증/결제 도메인은 리다이렉트 차단에서 제외
             let infraHosts = ["cloudflare.com", "challenges.cloudflare.com", "hcaptcha.com",
-                              "recaptcha.net", "google.com", "gstatic.com", "cf-ipv6.com"]
+                              "recaptcha.net", "google.com", "gstatic.com", "cf-ipv6.com",
+                              // 로그인/인증
+                              "kakao.com", "naver.com", "apple.com", "facebook.com",
+                              "accounts.google.com", "appleid.apple.com", "line.me",
+                              // 결제 (한국 PG/간편결제)
+                              "tosspayments.com", "inicis.com", "nicepay.co.kr", "kcp.co.kr",
+                              "paypal.com", "stripe.com", "kakaopay.com", "payco.com",
+                              // 본인인증
+                              "danal.co.kr", "ok-name.co.kr", "vno.co.kr", "mobile-ok.com"]
             let isInfra = infraHosts.contains { targetHost.hasSuffix($0) } ||
                           infraHosts.contains { currentHost.hasSuffix($0) }
 
@@ -592,17 +611,20 @@ enum WebViewConfigurator {
         uc.addUserScript(WKUserScript(source: PrivacyScripts.mainJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
         config.userContentController = uc
         config.defaultWebpagePreferences.allowsContentJavaScript = true
-        // ★ 광고 차단 규칙 적용 (컴파일 완료 여부에 따라)
+        // ★ 광고 차단 규칙 적용
+        // isCompiled면 즉시, 아니면 컴파일 완료 알림을 기다림
         if privacyEngine.contentBlocker.isCompiled {
             privacyEngine.contentBlocker.applyCachedRules(to: uc)
-        } else {
-            // 컴파일 미완료 시 → 비동기로 적용
-            Task {
-                await privacyEngine.contentBlocker.compile()
-                await MainActor.run {
-                    privacyEngine.contentBlocker.applyCachedRules(to: uc)
-                }
-            }
+        }
+        // ★ 컴파일 완료(또는 원격 필터 로드 완료) 시 규칙 재적용
+        // 이미 생성된 WebView에도 최신 규칙이 반영되도록 함
+        let blocker = privacyEngine.contentBlocker
+        coordinator.rulesObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name("gsContentRulesCompiled"), object: nil, queue: .main
+        ) { [weak uc] _ in
+            guard let uc = uc else { return }
+            uc.removeAllContentRuleLists()
+            blocker.applyCachedRules(to: uc)
         }
         return config
     }

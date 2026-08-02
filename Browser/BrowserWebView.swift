@@ -35,6 +35,21 @@ struct BrowserWebView: UIViewRepresentable {
                 guard let media = n.object as? DetectedMedia, let coord = coord else { return }
                 coord.startWKDownload(url: media.url, title: media.title)
             }
+            // ★ 재사용 WebView에도 최신 광고 규칙 적용
+            let uc = existing.configuration.userContentController
+            let blocker = privacyEngine.contentBlocker
+            if blocker.isCompiled {
+                uc.removeAllContentRuleLists()
+                blocker.applyCachedRules(to: uc)
+            }
+            if let oldRules = coord.rulesObserver { NotificationCenter.default.removeObserver(oldRules) }
+            coord.rulesObserver = NotificationCenter.default.addObserver(
+                forName: Notification.Name("gsContentRulesCompiled"), object: nil, queue: .main
+            ) { [weak uc] _ in
+                guard let uc = uc else { return }
+                uc.removeAllContentRuleLists()
+                blocker.applyCachedRules(to: uc)
+            }
             return existing
         }
 
@@ -81,6 +96,10 @@ struct BrowserWebView: UIViewRepresentable {
         if let obs = coordinator.downloadObserver {
             NotificationCenter.default.removeObserver(obs)
             coordinator.downloadObserver = nil
+        }
+        if let obs = coordinator.rulesObserver {
+            NotificationCenter.default.removeObserver(obs)
+            coordinator.rulesObserver = nil
         }
         coordinator.removeObservers(from: webView)
     }
