@@ -59,21 +59,32 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             uc.addUserScript(WKUserScript(source: PrivacyScripts.mainJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
             return
         }
-        // ★ CF 감지 — 모든 경우 (handledDomains 무관)
-        // 10번 중 1번 루프 원인: handledDomains에 있으면 별도 경로 → 타이밍 이슈
-        // 수정: 단일 경로로 통합
+        // ★ CF 감지 — 단, '검증 진행 중'이면 방해하지 않음
+        // 검증 중(Turnstile 스피너)에 reload를 걸면 검증이 중단되어 무한 반복됨
         w.evaluateJavaScript("""
         (function(){
             var t = document.title || '';
+            // CF 챌린지 페이지인가? (한국어 제목 포함)
             var isCF = (t === 'Just a moment...'
                 || t.indexOf('Checking your browser') !== -1
                 || t.indexOf('Attention Required') !== -1
-                || !!document.querySelector('#challenge-form,.cf-browser-verification,#cf-wrapper,.hcaptcha-box')
+                || t.indexOf('보안 확인') !== -1
+                || t.indexOf('잠시만 기다') !== -1
+                || !!document.querySelector('#challenge-form,.cf-browser-verification,#cf-wrapper,#cf-challenge-running')
                 || location.hostname === 'challenges.cloudflare.com');
-            return isCF ? '1' : '0';
+            if (!isCF) return '0';
+            // Turnstile 위젯이 살아있고 검증 중이면 → 건드리지 않음
+            var widget = document.querySelector('#challenge-stage, .cf-turnstile, iframe[src*="challenges.cloudflare.com"]');
+            if (widget) return 'verifying';
+            return '1';
         })()
         """) { [weak self, weak w] result, _ in
             guard let self = self, let w = w, let str = result as? String else { return }
+            if str == "verifying" {
+                // ★ CF가 정상 검증 중 → 아무것도 하지 않고 완료를 기다림
+                // (reload를 걸면 검증이 중단되어 무한 루프)
+                return
+            }
             if str == "1" {
                 // ★ CF 감지 → handledDomains 상관없이 항상 처리
                 self.reloadPending = true
