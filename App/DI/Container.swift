@@ -16,7 +16,8 @@ final class DIContainer: @unchecked Sendable {
     init() {
         // ★ CF 안정성: 문제되는 기능을 1회 강제 해제
         DiagnosticMode.applyCFSafetyMigration()
-        self.settingsStore = SettingsStore()        self.contentBlocker = ContentBlockerManager()
+        self.settingsStore = SettingsStore()
+        self.contentBlocker = ContentBlockerManager()
         self.dnsManager = DNSManager()
         self.privacyEngine = PrivacyEngine(contentBlocker: contentBlocker)
         self.vaultManager = VaultManager()
