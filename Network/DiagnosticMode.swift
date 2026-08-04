@@ -14,7 +14,8 @@ enum DiagnosticMode {
 
     /// 제3자 쿠키 차단
     static var cookieBlockEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: "diag.cookieBlock") as? Bool ?? true }
+        // ★ 기본 OFF — CF Turnstile의 제3자 쿠키 교환을 방해함
+        get { UserDefaults.standard.object(forKey: "diag.cookieBlock") as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: "diag.cookieBlock") }
     }
 
@@ -65,10 +66,11 @@ enum DiagnosticMode {
     /// 앱 시작 시 1회 실행 — CF를 방해하는 기능을 강제로 끔
     /// (기존 사용자는 UserDefaults에 true가 저장되어 있어 기본값이 적용되지 않음)
     static func applyCFSafetyMigration() {
-        let key = "diag.cfSafetyMigration.v1"
+        let key = "diag.cfSafetyMigration.v2"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         cfHandlingEnabled = false
         fakeUserAgentEnabled = false
+        cookieBlockEnabled = false
         relayEnabled = false
         persistentCookiesEnabled = true
         UserDefaults.standard.set(true, forKey: key)

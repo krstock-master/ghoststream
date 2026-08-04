@@ -52,11 +52,31 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             }
         }
         let host = w.url?.host ?? ""
-        // ★ 진단: CF 자동 처리 꺼짐 → 아무것도 하지 않음 (순수 브라우징)
+        // ★ 진단: CF 자동 처리 꺼짐 → 리로드/스크립트 제거는 하지 않음
+        //   단, 핑거프린팅 방어는 CF 페이지에 절대 주입하면 안 된다.
+        //   (Canvas/WebGL 스푸핑이 CF에게 봇 신호로 잡힘)
         guard DiagnosticMode.cfHandlingEnabled else {
-            if DiagnosticMode.fingerprintDefenseEnabled, !handledDomains.contains(host) {
-                if let fp = privacyEngine.fingerprintDefenseScript { w.evaluateJavaScript(fp) }
-                handledDomains.insert(host)
+            guard DiagnosticMode.fingerprintDefenseEnabled,
+                  !handledDomains.contains(host) else { return }
+            w.evaluateJavaScript("""
+            (function(){
+                var t = document.title || '';
+                var h = location.hostname || '';
+                var isCF = (t === 'Just a moment...'
+                    || t.indexOf('Checking your browser') !== -1
+                    || t.indexOf('Attention Required') !== -1
+                    || t.indexOf('보안 확인') !== -1
+                    || h.indexOf('challenges.cloudflare.com') !== -1
+                    || !!document.querySelector('#challenge-form,#challenge-stage,.cf-turnstile,#cf-wrapper,.cf-browser-verification'));
+                return isCF ? '1' : '0';
+            })()
+            """) { [weak self, weak w] result, _ in
+                guard let self = self, let w = w,
+                      let s = result as? String, s == "0" else { return }
+                if let fp = self.privacyEngine.fingerprintDefenseScript {
+                    w.evaluateJavaScript(fp)
+                }
+                self.handledDomains.insert(host)
             }
             return
         }
