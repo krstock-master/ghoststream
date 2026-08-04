@@ -62,12 +62,17 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             (function(){
                 var t = document.title || '';
                 var h = location.hostname || '';
-                var isCF = (t === 'Just a moment...'
+                var sig = (typeof window._cf_chl_opt !== 'undefined')
+                    || (typeof window.__CF$cv$params !== 'undefined')
+                    || !!document.querySelector('script[src*="/cdn-cgi/challenge-platform/"]')
+                    || !!document.querySelector('iframe[src*="challenges.cloudflare.com"]')
+                    || !!document.querySelector('#challenge-form,#challenge-stage,#challenge-running,.cf-turnstile,#cf-wrapper,.cf-browser-verification');
+                var isCF = (sig
+                    || t === 'Just a moment...'
                     || t.indexOf('Checking your browser') !== -1
                     || t.indexOf('Attention Required') !== -1
                     || t.indexOf('보안 확인') !== -1
-                    || h.indexOf('challenges.cloudflare.com') !== -1
-                    || !!document.querySelector('#challenge-form,#challenge-stage,.cf-turnstile,#cf-wrapper,.cf-browser-verification'));
+                    || h.indexOf('challenges.cloudflare.com') !== -1);
                 return isCF ? '1' : '0';
             })()
             """) { [weak self, weak w] result, _ in
@@ -93,8 +98,12 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         w.evaluateJavaScript("""
         (function(){
             var t = document.title || '';
-            // CF 챌린지 페이지인가? (한국어 제목 포함)
-            var isCF = (t === 'Just a moment...'
+            // 언어 무관 CF 신호 우선 (제목은 로케일마다 다름)
+            var sig = (typeof window._cf_chl_opt !== 'undefined')
+                || (typeof window.__CF$cv$params !== 'undefined')
+                || !!document.querySelector('script[src*="/cdn-cgi/challenge-platform/"]');
+            var isCF = (sig
+                || t === 'Just a moment...'
                 || t.indexOf('Checking your browser') !== -1
                 || t.indexOf('Attention Required') !== -1
                 || t.indexOf('보안 확인') !== -1
@@ -166,30 +175,6 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         decisionHandler(.allow)
     }
 
-    // 도메인이 같은 사이트인지 비교 (서브도메인 허용: m.naver.com == naver.com)
-    private func domainsMatch(_ a: String, _ b: String) -> Bool {
-        func registrable(_ h: String) -> String {
-            let parts = h.split(separator: ".")
-            guard parts.count >= 2 else { return h }
-            return parts.suffix(2).joined(separator: ".")
-        }
-        return registrable(a) == registrable(b)
-    }
-
-    // 알려진 광고 리다이렉트/트래킹 도메인 패턴
-    private func isKnownAdRedirect(_ host: String) -> Bool {
-        let patterns = [
-            "doubleclick", "googlesyndication", "googleadservices", "adnxs",
-            "popads", "popcash", "propellerads", "adsterra", "hilltopads",
-            "clickadu", "exoclick", "juicyads", "trafficjunky", "adservice",
-            "onclickalgo", "onclckds", "clcktrp", "redirectvoluum", "voluum",
-            "go.pdrts", "smartadserver", "adskeeper", "mgid", "revcontent",
-            "trafficstars", "tsyndicate", "adsco.re", "clickadilla", "adav",
-            "bidgear", "adpushup", "admaven", "admngr", "clickndownload"
-        ]
-        let lower = host.lowercased()
-        return patterns.contains { lower.contains($0) }
-    }
     // MARK: - Intercept media responses → WKDownload
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         let url = navigationResponse.response.url
@@ -579,7 +564,14 @@ enum WebViewConfigurator {
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         // ★ UA에 앱 이름이 붙지 않도록 (CF가 비-Safari 앱으로 인식하는 것 방지)
-        config.applicationNameForUserAgent = "Version/\(UIDevice.current.systemVersion) Mobile/15E148 Safari/604.1"
+        //   Safari의 Version/ 토큰은 major.minor 2자리 형식이므로 동일하게 맞춘다.
+        //   (systemVersion이 "26.0.1"이면 Safari는 "Version/26.0"으로 표기)
+        let sysVer = UIDevice.current.systemVersion
+        let verParts = sysVer.split(separator: ".")
+        let safariVersion = verParts.count >= 2
+            ? "\(verParts[0]).\(verParts[1])"
+            : sysVer
+        config.applicationNameForUserAgent = "Version/\(safariVersion) Mobile/15E148 Safari/604.1"
         // ★ CF 챌린지가 창을 열어야 할 수 있으므로 기본값 유지
         //   (v1.7.3에서 false로 바꾼 것이 CF 검증을 방해했음)
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
