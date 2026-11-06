@@ -222,6 +222,11 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         // ★ http/https는 항상 허용 (v1.7.2 동작 복원)
         //   여기서 리다이렉트를 판정하면 CF 챌린지 통과 이동까지 막혀
         //   무한 루프가 발생한다. 납치광고는 createWebViewWith에서만 처리.
+        // ★ QA: <a download> / blob: 다운로드 링크는 표시가 아니라 다운로드로 (iOS 14.5+)
+        if navigationAction.shouldPerformDownload {
+            decisionHandler(.download)
+            return
+        }
         decisionHandler(.allow)
     }
 
@@ -236,14 +241,8 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         let url = navigationResponse.response.url
         let mime = navigationResponse.response.mimeType ?? ""
         let ext = url?.pathExtension.lowercased() ?? ""
-        // 이미 다운로드 중인 URL은 스킵 (정규화된 URL로 비교)
-        if let urlStr = url?.absoluteString {
-            let normalized = urlStr.components(separatedBy: "?").first ?? urlStr
-            if recentlyDownloadedURLs.contains(normalized) {
-                decisionHandler(.allow)
-                return
-            }
-        }
+        // ★ QA: 쿼리를 잘라 비교하던 '최근 다운로드' 게이트 제거 — download.php?id=1 / ?id=2 가 같은 URL로 취급되어
+        //   두 번째 파일이 다운로드 대신 웹뷰 표시로 빠지던 문제. 사용자가 직접 연 링크는 항상 정책대로 처리한다.
         // ★ F2/F3 FIX: 미디어/파일 다운로드 (이미지는 제외 — 네비게이션 시 표시만)
         let downloadExts = [
             // 영상/오디오
@@ -294,6 +293,11 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             decisionHandler(.download)
             return
         }
+        // ★ QA: WebView가 표시할 수 없는 MIME(main frame)은 다운로드 (빈 화면 방지)
+        if navigationResponse.isForMainFrame && !navigationResponse.canShowMIMEType {
+            decisionHandler(.download)
+            return
+        }
         // Non-main-frame media → emit for overlay button
         if let url = url, (mime.hasPrefix("video/") || mime.contains("gif")) && !navigationResponse.isForMainFrame {
             let type: DetectedMedia.MediaType = mime.contains("gif") ? .gif : .mp4
@@ -304,9 +308,15 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     // MARK: - WKDownloadDelegate (iOS 14.5+)
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
         download.delegate = self
+        let src = navigationResponse.response.url
+        let title = src?.lastPathComponent.removingPercentEncoding ?? src?.lastPathComponent ?? "파일"
+        downloadManager?.trackWebKitDownload(download, title: title, sourceURL: src)
     }
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
         download.delegate = self
+        let src = navigationAction.request.url
+        let title = src?.lastPathComponent.removingPercentEncoding ?? src?.lastPathComponent ?? "파일"
+        downloadManager?.trackWebKitDownload(download, title: title, sourceURL: src)
     }
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String) async -> URL? {
         // ★ HTTP validation
@@ -316,27 +326,25 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 NotificationCenter.default.post(name: .downloadFailed, object: "서버 오류: HTTP \(statusCode)")
                 return nil
             }
-            // Reject HTML responses (login pages, error pages)
-            if let mime = httpResponse.mimeType?.lowercased(), mime.contains("text/html") {
-                NotificationCenter.default.post(name: .downloadFailed, object: "다운로드 실패: 서버가 영상 대신 웹페이지를 반환")
+            // Reject HTML/JSON responses (login pages, error pages)
+            let srcExt = response.url?.pathExtension.lowercased() ?? ""
+            if let mime = httpResponse.mimeType?.lowercased(),
+               (mime.contains("text/html") || mime == "application/json"),
+               !["html", "htm", "json"].contains(srcExt) {
+                downloadManager?.finishWebKitDownload(download, fileURL: nil, errorMessage: "서버가 파일 대신 웹페이지를 반환")
+                NotificationCenter.default.post(name: .downloadFailed, object: "다운로드 실패: 서버가 파일 대신 웹페이지를 반환")
                 return nil
             }
         }
-        // Build filename: prefer title from activeWKDownloads, then suggested
-        let title = activeWKDownloads[download] ?? suggestedFilename
-        var filename = suggestedFilename
-        if filename.isEmpty || filename == "Unknown" {
-            let ext = (response as? HTTPURLResponse)?.mimeType?.contains("mp4") == true ? "mp4" : "mp4"
-            filename = "\(title.prefix(50))_\(Int(Date().timeIntervalSince1970)).\(ext)"
-        }
-        filename = filename.replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: ":", with: "_")
-        pendingDownloadFilenames[download] = filename
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Downloads", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let dest = dir.appendingPathComponent(filename)
-        if FileManager.default.fileExists(atPath: dest.path) { try? FileManager.default.removeItem(at: dest) }
+        // ★ QA: 공통 규칙 (Content-Disposition filename* 한글 → 제목(영상) → suggestedFilename → URL) + 확장자 보정
+        let title = activeWKDownloads[download] ?? ""
+        let mime = response.mimeType?.lowercased() ?? ""
+        let filename = DownloadFileNaming.resolveFilename(response: response, suggested: suggestedFilename, title: title,
+                                                          sourceURL: response.url,
+                                                          preferTitle: !title.isEmpty && mime.hasPrefix("video/"))
+        // ★ QA: 같은 이름이 있으면 지우지 않고 "이름 (1).ext" — 이전 다운로드 덮어쓰기/동시 다운로드 충돌 방지
+        let dest = DownloadFileNaming.reserveUniqueURL(in: MediaDownloadManager.downloadDirectory, filename: filename)
+        pendingDownloadFilenames[download] = dest.lastPathComponent
         return dest
     }
     func downloadDidFinish(_ download: WKDownload) {
@@ -346,18 +354,21 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             .appendingPathComponent("Downloads", isDirectory: true)
         if let fname = fname {
             let filePath = dir.appendingPathComponent(fname)
-            let size = (try? FileManager.default.attributesOfItem(atPath: filePath.path)[.size] as? Int) ?? 0
-            // ★ 빈 파일 또는 에러 페이지 감지
-            if size < 100 {
+            DownloadFileNaming.releaseReservation(filePath)
+            let size = MediaDownloadManager.fileSize(filePath)
+            // ★ 빈 파일 또는 (MIME 위장) 에러 페이지 감지
+            let ext = filePath.pathExtension.lowercased()
+            let isHTML = !["html", "htm"].contains(ext) && DownloadFileNaming.looksLikeHTML(fileAt: filePath)
+            if size < MediaDownloadManager.minimumValidFileSize || isHTML {
                 try? FileManager.default.removeItem(at: filePath)
-                NotificationCenter.default.post(name: .downloadFailed, object: "다운로드 실패: 파일이 비어 있음")
+                let msg = isHTML ? "다운로드 실패: 서버가 파일 대신 웹페이지를 반환" : "다운로드 실패: 파일이 비어 있음"
+                downloadManager?.finishWebKitDownload(download, fileURL: nil, errorMessage: msg)
+                NotificationCenter.default.post(name: .downloadFailed, object: msg)
                 return
             }
-            let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
-            // ★ 프라이버시: 다운로드 이미지의 EXIF/GPS 메타데이터 자동 제거
-            if MetadataScrubber.canScrub(filePath) {
-                MetadataScrubber.scrubImage(at: filePath)
-            }
+            let sizeStr = ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+            // ★ QA: EXIF/GPS 제거는 MediaDownloadManager가 백그라운드에서 수행(실패 시 토스트) — 메인 스레드 동기 처리 제거
+            downloadManager?.finishWebKitDownload(download, fileURL: filePath, errorMessage: nil)
             NotificationCenter.default.post(name: .downloadCompleted,
                 object: "✅ \(title) 다운로드 완료 (\(sizeStr))")
         } else {
@@ -371,6 +382,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("Downloads", isDirectory: true)
             let file = dir.appendingPathComponent(fname)
+            DownloadFileNaming.releaseReservation(file)
             try? FileManager.default.removeItem(at: file)
         }
         let nsError = error as NSError
@@ -381,6 +393,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         case NSURLErrorCancelled: msg = "다운로드 취소됨"
         default: msg = "다운로드 실패: \(error.localizedDescription)"
         }
+        downloadManager?.finishWebKitDownload(download, fileURL: nil, errorMessage: msg)
         NotificationCenter.default.post(name: .downloadFailed, object: msg)
     }
     // MARK: - New window (target=_blank / window.open)
@@ -443,6 +456,7 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 case "gif": t = .gif
                 case "image": t = .image
                 case "webm": t = .webm
+                case "dash", "ts": continue  // ★ QA: .mpd/.ts 조각은 단독 다운로드 불가 (2초짜리 조각/XML 저장 방지)
                 default: t = .mp4
                 }
                 let media = DetectedMedia(url: u, type: t, quality: (s["label"] as? String) ?? "default",
@@ -522,17 +536,16 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     // MARK: - Cookie Sync — ★ 쿠키를 먼저 동기화한 후 다운로드 시작
     func syncCookiesToDownloadManager() {
         guard let wv = webView, let dm = downloadManager else { return }
+        dm.updateUserAgent(from: wv)
         wv.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
-            let storage = HTTPCookieStorage.shared
-            cookies.forEach { storage.setCookie($0) }
-            dm.cookieStorage = storage
-            // Also set on URLSession config
-            dm.urlSession?.configuration.httpCookieStorage?.setCookies(cookies, for: wv.url, mainDocumentURL: nil)
+            // ★ QA: HTTPCookieStorage.shared 는 디스크에 영구 저장 → 사생활 탭(nonPersistent) 쿠키가 디스크로 새고 Fire 후에도 남음
+            dm.importCookies(cookies)
         }
     }
     // ★ NEW: Download with cookies pre-loaded (async-safe)
     func downloadWithCookiesSync(media: DetectedMedia) {
         guard let wv = webView, let dm = downloadManager else { return }
+        dm.updateUserAgent(from: wv)  // ★ QA: URLSession/HLS 요청 UA = 실제 WKWebView UA
         wv.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
             // Cookies are ready NOW — start download
             DispatchQueue.main.async {
@@ -545,11 +558,20 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     // → 쿠키, 인증 토큰, Referer 자동 포함 → CDN이 정상 응답
     private var activeWKDownloads: [WKDownload: String] = [:]  // download → title
     func startWKDownload(url: URL, title: String) {
-        // URL 정규화로 중복 다운로드 방지
-        // 쿼리 파라미터가 다른 같은 영상 URL도 중복으로 처리
+        // ★ QA: DASH/MSE·blob·.ts 조각 등은 시작 전에 이유를 알려준다 (조용히 엉뚱한 파일 저장 방지)
+        let probe = DetectedMedia(url: url, type: url.absoluteString.contains(".m3u8") ? .hls : .mp4, quality: "Auto",
+                                  title: title, referer: "", thumbnail: nil, estimatedSize: nil)
+        if let reason = MediaDownloadManager.unsupportedReason(for: probe) {
+            NotificationCenter.default.post(name: .downloadFailed, object: reason)
+            return
+        }
+        // ★ QA: 중복 판정은 전체 URL로 (쿼리 제거 시 ?id=1 / ?id=2 다른 파일이 조용히 무시됨)
+        //   JS 버튼이 downloadVideo + alohaDownload 를 동시에 보내는 이중 호출은 그대로 걸러진다.
         let normalizedURL = url.absoluteString
-            .components(separatedBy: "?").first ?? url.absoluteString
-        guard !recentlyDownloadedURLs.contains(normalizedURL) else { return }
+        guard !recentlyDownloadedURLs.contains(normalizedURL) else {
+            NotificationCenter.default.post(name: .downloadCompleted, object: "이미 다운로드 중입니다")
+            return
+        }
         recentlyDownloadedURLs.insert(normalizedURL)
         // 3분 후 해제
         DispatchQueue.main.asyncAfter(deadline: .now() + 180) { [weak self] in
@@ -572,12 +594,15 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         }
         // ★ MP4/WebM/MOV: WKWebView.startDownload — 브라우저 세션 그대로 사용
         var request = URLRequest(url: url)
-        request.setValue(tab.url?.absoluteString ?? "", forHTTPHeaderField: "Referer")
+        if let ref = tab.url?.absoluteString, !ref.isEmpty {  // ★ QA: 빈 Referer 헤더 전송 금지
+            request.setValue(ref, forHTTPHeaderField: "Referer")
+        }
         Task { @MainActor in
             do {
                 let download = try await wv.startDownload(using: request)
                 download.delegate = self
                 activeWKDownloads[download] = title
+                downloadManager?.trackWebKitDownload(download, title: title, sourceURL: url)  // ★ QA: 목록/진행률/취소
                 NotificationCenter.default.post(name: .downloadCompleted, object: "다운로드 시작: \(title)")
             } catch {
                 // Fallback: WKDownload 실패 시 URLSession으로 재시도
