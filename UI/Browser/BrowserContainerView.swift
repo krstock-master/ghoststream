@@ -1,5 +1,5 @@
 // UI/Browser/BrowserContainerView.swift
-// GhostStream v0.8.0 — Chrome/Brave hybrid UI
+// GhostStream v2.0.5 — Firefox 스타일 하단 툴바 + Arc 스타일 새 탭
 import SwiftUI
 import GhostStreamCore
 import WebKit
@@ -31,8 +31,8 @@ struct BrowserContainerView: View {
     @State private var showReaderMode = false
     @State private var readerTitle = ""
     @State private var readerContent = ""
-    @AppStorage("addressBarPosition") private var addressBarBottom = true
     @State private var isToolbarCompact = false
+    @State private var showFireConfirm = false
     @FocusState private var isURLFieldFocused: Bool
     @FocusState private var isFindFieldFocused: Bool
 
@@ -97,10 +97,12 @@ struct BrowserContainerView: View {
                     Spacer()
                     Button { withAnimation { toastMessage = nil } } label: {
                         Image(systemName: "xmark").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                            .frame(width: 32, height: 32).contentShape(Rectangle())
                     }
+                    .accessibilityLabel("알림 닫기")
                 }
                 .padding(14)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.panel))
                 .shadow(color: .black.opacity(0.1), radius: 8, y: 4)
                 .padding(.horizontal, 16).padding(.top, 54)
                 .transition(.move(edge: .top).combined(with: .opacity))
@@ -133,6 +135,11 @@ struct BrowserContainerView: View {
             ReaderModeView(title: readerTitle, content: readerContent, url: tabManager.activeTab?.url)
         }
         .overlay { phishingWarningOverlay }
+        // ★ v2.0.5: Fire는 모든 탭을 닫고 데이터를 지우므로 확인 후 실행
+        .confirmationDialog("모든 탭을 닫고 쿠키·캐시·기록을 지울까요?", isPresented: $showFireConfirm, titleVisibility: .visible) {
+            Button("모든 데이터 지우기", role: .destructive) { fireButtonAction() }
+            Button("취소", role: .cancel) {}
+        }
     }
 
     private var elementHideBanner: some View {
@@ -169,18 +176,30 @@ struct BrowserContainerView: View {
                     TextField("검색어 또는 주소 입력", text: $addressText)
                         .textFieldStyle(.plain).font(.system(size: 16))
                         .autocorrectionDisabled().textInputAutocapitalization(.never)
+                        .keyboardType(.webSearch).submitLabel(.go)
                         .focused($isURLFieldFocused)
                         .onSubmit { navigateTo(addressText); closeSearch() }
+                        .onChange(of: isURLFieldFocused) { _, focused in
+                            // ★ v2.0.5: 주소창 탭 시 URL 전체 선택 (지우지 않음 — Safari/Firefox 방식)
+                            //   바로 타이핑하면 덮어쓰고, 탭하면 커서 편집 가능
+                            guard focused, !addressText.isEmpty else { return }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                UIApplication.shared.sendAction(#selector(UIResponder.selectAll(_:)), to: nil, from: nil, for: nil)
+                            }
+                        }
                     if !addressText.isEmpty {
                         Button { addressText = "" } label: {
                             Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                                .frame(width: 28, height: 28).contentShape(Rectangle())
                         }
+                        .accessibilityLabel("입력 지우기")
                     }
                 }
-                .padding(.horizontal, 12).padding(.vertical, 10)
-                .background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
                 Button("취소") { closeSearch() }
                     .font(.system(size: 16, weight: .medium)).foregroundStyle(.teal)
+                    .frame(minHeight: DS.minTapTarget)
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
 
@@ -272,17 +291,10 @@ struct BrowserContainerView: View {
             if tab.url == nil {
                 NewTabPage { navigateTo($0) }
             } else {
-                ZStack(alignment: .top) {
-                    BrowserWebView(tab: tab, privacyEngine: privacyEngine, downloadManager: downloadManager,
-                        bookmarkManager: container.bookmarkManager,
-                        onMediaDetected: { _ in }, webViewRef: $webViewRef).id(tab.id)
-                    // ★ Firefox 스타일 프로그레스 바
-                    if tab.isLoading {
-                        ProgressView(value: tab.loadProgress)
-                            .tint(.teal)
-                            .scaleEffect(x: 1, y: 0.5, anchor: .top)
-                    }
-                }
+                // ★ v2.0.5: 상단 ProgressView 제거 — 하단 툴바 프로그레스 바와 중복 표시되던 문제
+                BrowserWebView(tab: tab, privacyEngine: privacyEngine, downloadManager: downloadManager,
+                    bookmarkManager: container.bookmarkManager,
+                    onMediaDetected: { _ in }, webViewRef: $webViewRef).id(tab.id)
             }
         }
     }
@@ -304,7 +316,7 @@ struct BrowserContainerView: View {
                     .padding(.horizontal, 14).padding(.vertical, 6)
                     .background(.teal).clipShape(Capsule())
             }.padding(14)
-            .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 14))
+            .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: DS.Radius.panel))
             .shadow(color: .black.opacity(0.1), radius: 6, y: 3)
         }
     }
@@ -318,6 +330,7 @@ struct BrowserContainerView: View {
                         .frame(width: geo.size.width * (tabManager.activeTab?.loadProgress ?? 0), height: 2.5)
                         .animation(.easeInOut(duration: 0.2), value: tabManager.activeTab?.loadProgress)
                 }.frame(height: 2.5)
+                .accessibilityHidden(true)
             }
             // Address bar pill (★ 스크롤 시 축소)
             if !isToolbarCompact {
@@ -359,7 +372,9 @@ struct BrowserContainerView: View {
                             .foregroundStyle(.green)
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(.green.opacity(0.1), in: Capsule())
+                            .frame(minHeight: 28).contentShape(Rectangle())
                         }
+                        .accessibilityLabel("보호 현황, \(rpt.adsBlocked + rpt.trackersBlocked)개 차단됨")
                     }
 
                     // 북마크 별
@@ -369,10 +384,12 @@ struct BrowserContainerView: View {
                         } label: {
                             Image(systemName: container.bookmarkManager.isBookmarked(url: url) ? "star.fill" : "star")
                                 .font(.system(size: 13)).foregroundStyle(container.bookmarkManager.isBookmarked(url: url) ? .yellow : .secondary)
+                                .frame(width: 28, height: 28).contentShape(Rectangle())
                         }
+                        .accessibilityLabel(container.bookmarkManager.isBookmarked(url: url) ? "북마크 해제" : "북마크 추가")
                     }
                 }
-                .padding(.horizontal, 12).padding(.vertical, 10)
+                .padding(.horizontal, 12).padding(.vertical, 6)
                 .frame(maxWidth: .infinity)
                 .background(.ultraThinMaterial).clipShape(Capsule())
                 .shadow(color: .black.opacity(0.05), radius: 3, y: 1)
@@ -380,17 +397,22 @@ struct BrowserContainerView: View {
             .padding(.horizontal, 14).padding(.top, 8)
             } // end isToolbarCompact
             // ★ Firefox-style bottom toolbar: ← → [address pill] tabs ⋯
-            HStack(spacing: 4) {
+            // ★ v2.0.5: 4개 버튼을 균등 배치 + 최소 44pt 터치 영역 + VoiceOver 라벨
+            HStack(spacing: 0) {
                 Button { webViewRef?.goBack() } label: {
                     Image(systemName: "chevron.left").font(.system(size: 18))
                         .foregroundStyle(tabManager.activeTab?.canGoBack == true ? Color.primary : Color.primary.opacity(0.2))
-                        .frame(width: 40, height: 44).contentShape(Rectangle())
+                        .frame(maxWidth: .infinity, minHeight: DS.minTapTarget).contentShape(Rectangle())
                 }
+                .disabled(tabManager.activeTab?.canGoBack != true)
+                .accessibilityLabel("뒤로")
                 Button { webViewRef?.goForward() } label: {
                     Image(systemName: "chevron.right").font(.system(size: 18))
                         .foregroundStyle(tabManager.activeTab?.canGoForward == true ? Color.primary : Color.primary.opacity(0.2))
-                        .frame(width: 40, height: 44).contentShape(Rectangle())
+                        .frame(maxWidth: .infinity, minHeight: DS.minTapTarget).contentShape(Rectangle())
                 }
+                .disabled(tabManager.activeTab?.canGoForward != true)
+                .accessibilityLabel("앞으로")
                 // 탭
                 Button { showTabGrid = true } label: {
                     ZStack {
@@ -398,8 +420,10 @@ struct BrowserContainerView: View {
                             .frame(width: 20, height: 20)
                         Text("\(tabManager.tabs.count)")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    }.frame(width: 40, height: 44).contentShape(Rectangle())
+                    }.frame(maxWidth: .infinity, minHeight: DS.minTapTarget).contentShape(Rectangle())
                 }
+                .foregroundStyle(.primary)
+                .accessibilityLabel("탭 \(tabManager.tabs.count)개")
                 // 메뉴 (Firefox 스타일)
                 Menu {
                     Section {
@@ -439,38 +463,35 @@ struct BrowserContainerView: View {
                                 guard let jsonStr = result as? String, let data = jsonStr.data(using: .utf8),
                                       let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
                                 readerTitle = dict["title"] ?? ""; readerContent = dict["content"] ?? ""
-                                if readerContent.count > 100 { showReaderMode = true }
+                                if readerContent.count > 100 {
+                                    showReaderMode = true
+                                } else {
+                                    // ★ v2.0.5: 실패 시 아무 반응이 없던 문제 → 안내 토스트
+                                    toastIsError = true; toastMessage = "이 페이지는 리더 모드로 볼 수 없습니다"
+                                    Task { try? await Task.sleep(for: .seconds(3)); withAnimation { toastMessage = nil } }
+                                }
                             }
                         } label: { Label("리더 모드", systemImage: "doc.plaintext") }
                         Button {
                             webViewRef?.evaluateJavaScript("(function(){var v=document.querySelector('video');if(v){if(v.webkitSupportsPresentationMode){v.webkitSetPresentationMode('picture-in-picture');}else if(document.pictureInPictureEnabled){v.requestPictureInPicture();}}})()")
-                        } label: { Label("PiP", systemImage: "pip") }
+                        } label: { Label("화면 속 화면", systemImage: "pip") }
                     }
                     Section {
                         Button { showSettings = true } label: { Label("설정", systemImage: "gearshape") }
-                        Button(role: .destructive) { fireButtonAction() } label: { Label("Fire!", systemImage: "flame.fill") }
+                        Button(role: .destructive) { showFireConfirm = true } label: { Label("모든 데이터 지우기", systemImage: "flame.fill") }
                     }
                 } label: {
                     Image(systemName: "line.3.horizontal").font(.system(size: 18))
-                        .frame(width: 40, height: 44).contentShape(Rectangle())
+                        .frame(maxWidth: .infinity, minHeight: DS.minTapTarget).contentShape(Rectangle())
                 }
+                .foregroundStyle(.primary)
+                .accessibilityLabel("메뉴")
             }
-            .padding(.horizontal, 4).padding(.bottom, 2)
+            .padding(.horizontal, 8).padding(.bottom, 2)
         }.background(.ultraThinMaterial)
     }
 
     // MARK: - Helpers
-
-    private func toolButton(_ label: String, _ icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: icon).font(.system(size: 16, weight: .regular))
-                Text(label).font(.system(size: 9, weight: .medium))
-            }
-            .foregroundStyle(.secondary)
-            .frame(width: 52)
-        }
-    }
 
     private func navigateTo(_ input: String) {
         let t = input.trimmingCharacters(in: .whitespaces); guard !t.isEmpty else { return }
@@ -517,20 +538,23 @@ struct BrowserContainerView: View {
                     Button { findText = ""; clearFindHighlights() } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary).font(.system(size: 14))
                     }
+                    .accessibilityLabel("검색어 지우기")
                 }
             }
             .padding(.horizontal, 10).padding(.vertical, 8)
             .background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: 10))
 
-            HStack(spacing: 4) {
+            HStack(spacing: 0) {
                 Button { findInPage(forward: false) } label: {
                     Image(systemName: "chevron.up").font(.system(size: 14, weight: .semibold)).foregroundStyle(.teal)
-                        .frame(width: 32, height: 32).contentShape(Rectangle())
+                        .frame(width: 40, height: DS.minTapTarget).contentShape(Rectangle())
                 }
+                .accessibilityLabel("이전 결과")
                 Button { findInPage(forward: true) } label: {
                     Image(systemName: "chevron.down").font(.system(size: 14, weight: .semibold)).foregroundStyle(.teal)
-                        .frame(width: 32, height: 32).contentShape(Rectangle())
+                        .frame(width: 40, height: DS.minTapTarget).contentShape(Rectangle())
                 }
+                .accessibilityLabel("다음 결과")
             }
 
             Button {
@@ -540,7 +564,7 @@ struct BrowserContainerView: View {
                 Text("완료").font(.system(size: 14, weight: .medium)).foregroundStyle(.teal)
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 6)
+        .padding(.horizontal, 12).padding(.vertical, 2)
         .background(Color(.systemBackground))
         .onAppear { isFindFieldFocused = true }
     }
@@ -567,7 +591,7 @@ struct BrowserContainerView: View {
                 tabManager.newTab()
                 DeviceProfileManager.shared.refreshProfile()
                 toastIsError = false
-                toastMessage = "🔥 모든 브라우징 데이터가 삭제되었습니다"
+                toastMessage = "모든 탭과 브라우징 데이터를 지웠습니다"
                 Task { try? await Task.sleep(for: .seconds(3)); withAnimation { toastMessage = nil } }
             }
         }
@@ -580,6 +604,7 @@ struct BrowserContainerView: View {
             VStack(spacing: 16) {
                 Image(systemName: "exclamationmark.shield.fill")
                     .font(.system(size: 44)).foregroundStyle(.red)
+                    .accessibilityHidden(true)
                 Text("위험한 사이트 경고").font(.title3.weight(.bold))
                 Text("이 사이트는 피싱 또는 악성 사이트로 의심됩니다.\n개인정보를 입력하지 마세요.")
                     .font(.subheadline).foregroundStyle(.secondary)
@@ -597,6 +622,7 @@ struct BrowserContainerView: View {
                         phishingRisk = .safe // 사용자가 무시
                     } label: {
                         Text("무시하고 진행").font(.subheadline).foregroundStyle(.secondary)
+                            .padding(.vertical, 12).contentShape(Rectangle())
                     }
                 }
             }
@@ -624,6 +650,7 @@ struct NewTabPage: View {
                     Image(systemName: "eye.slash.circle.fill")
                         .font(.system(size: 44))
                         .foregroundStyle(.teal.opacity(0.8))
+                        .accessibilityHidden(true)
                     Text("GhostStream")
                         .font(.system(size: 22, weight: .semibold, design: .rounded))
                         .foregroundStyle(.primary.opacity(0.7))
@@ -633,16 +660,18 @@ struct NewTabPage: View {
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary).font(.system(size: 14))
-                    TextField("검색 또는 URL", text: $searchText)
+                    TextField("검색어 또는 주소 입력", text: $searchText)
                         .textFieldStyle(.plain).font(.system(size: 15))
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
+                        .keyboardType(.webSearch).submitLabel(.go)
                         .focused($isSearchFocused)
                         .onSubmit { onNavigate(searchText); searchText = "" }
                     if !searchText.isEmpty {
                         Button { searchText = "" } label: {
                             Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                         }
+                        .accessibilityLabel("입력 지우기")
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 11)
@@ -664,13 +693,15 @@ struct NewTabPage: View {
                         Spacer()
                     }
                     .padding(16)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.panel))
+                    .accessibilityElement(children: .combine)
                     .padding(.horizontal, 20)
                 }
 
                 // ★ 빠른 접근 (북마크 또는 기본 사이트)
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(bookmarkManager.bookmarks.isEmpty ? "자주 방문" : "북마크")
+                    // ★ v2.0.5: 기본 사이트는 실제 방문 빈도와 무관하므로 "자주 방문" → "바로가기"
+                    Text(bookmarkManager.bookmarks.isEmpty ? "바로가기" : "북마크")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary).padding(.leading, 4)
 
@@ -678,15 +709,16 @@ struct NewTabPage: View {
                         if !bookmarkManager.bookmarks.isEmpty {
                             ForEach(bookmarkManager.bookmarks.prefix(8)) { bm in
                                 Button { onNavigate(bm.url.absoluteString) } label: {
-                                    VStack(spacing: 6) {
-                                        ZStack {
-                                            Circle().fill(.ultraThinMaterial).frame(width: 48, height: 48)
-                                            Text(String((bm.url.host ?? "?").prefix(1)).uppercased())
-                                                .font(.system(size: 18, weight: .bold, design: .rounded))
-                                                .foregroundStyle(.teal)
-                                        }
+                                    // ★ v2.0.5: 기본 바로가기(ql)와 같은 타일 모양으로 통일
+                                    VStack(spacing: 8) {
+                                        Text(String((bm.url.host ?? "?").prefix(1)).uppercased())
+                                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                                            .foregroundStyle(.teal)
+                                            .frame(width: 52, height: 52)
+                                            .background(Color.teal.opacity(0.1))
+                                            .clipShape(RoundedRectangle(cornerRadius: 14))
                                         Text(bm.title.isEmpty ? (bm.url.host ?? "") : bm.title)
-                                            .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                                            .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
                                     }
                                 }
                             }
@@ -694,7 +726,7 @@ struct NewTabPage: View {
                             ql("Google", "magnifyingglass", .blue, "https://google.com")
                             ql("YouTube", "play.rectangle.fill", .red, "https://youtube.com")
                             ql("네이버", "n.circle.fill", .green, "https://naver.com")
-                            ql("Twitter", "at", .cyan, "https://x.com")
+                            ql("X", "at", .primary, "https://x.com")
                         }
                     }
                 }
@@ -703,18 +735,6 @@ struct NewTabPage: View {
                 Spacer()
             }
         }.background(Color(.systemBackground))
-    }
-
-    private func statCard(icon: String, value: String, label: String, color: Color) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon).font(.system(size: 20, weight: .medium)).foregroundStyle(color)
-            Text(value).font(.system(size: 18, weight: .bold, design: .rounded))
-            Text(label).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(color.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     private func ql(_ n: String, _ i: String, _ c: Color, _ u: String) -> some View {
