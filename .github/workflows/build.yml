@@ -7,7 +7,7 @@ on:
 jobs:
   build:
     name: Build IPA
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -36,7 +36,11 @@ jobs:
 
       - name: Setup Xcode
         run: |
-          XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          # macos-14 러너 지원 종료(2026) → macos-15. Xcode 16.x(iOS 18 SDK) 우선:
+          # 26 SDK로 링크하면 Liquid Glass/레이아웃 기본값이 바뀌므로 검증 전까지 16.x 유지
+          ls -d /Applications/Xcode*.app
+          XCODE_PATH=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          [ -z "$XCODE_PATH" ] && XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
           xcodebuild -version
 
