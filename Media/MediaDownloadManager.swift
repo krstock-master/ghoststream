@@ -208,9 +208,6 @@ final class MediaDownloadManager: NSObject, @unchecked Sendable {
         if path.hasSuffix(".mpd") {
             return "DASH(.mpd) 스트리밍은 지원하지 않습니다"
         }
-        if host.hasSuffix("googlevideo.com") || path.contains("/videoplayback") {
-            return "YouTube 등 MSE/DASH 분할 스트리밍은 지원하지 않습니다 (영상·음성이 분리된 조각만 받아집니다)"
-        }
         if path.hasSuffix(".ts") || path.hasSuffix(".m4s") {
             return "HLS 조각(.ts/.m4s) 하나만 감지되었습니다 — 재생목록(.m3u8)이 필요합니다"
         }
