@@ -54,6 +54,7 @@ struct PrivacyReportSheet: View {
 struct TabGridView: View {
     @Environment(TabManager.self) private var tabManager
     @Binding var showGrid: Bool
+    @State private var showCloseAllConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -100,6 +101,16 @@ struct TabGridView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationBarHidden(true)
+            // ★ v2.0.5: 모두 닫기는 되돌릴 수 없으므로 확인
+            .confirmationDialog("탭 \(tabManager.tabs.count)개를 모두 닫을까요?", isPresented: $showCloseAllConfirm, titleVisibility: .visible) {
+                Button("모두 닫기", role: .destructive) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        tabManager.closeAllTabs()
+                    }
+                    showGrid = false
+                }
+                Button("취소", role: .cancel) {}
+            }
         }
     }
 
@@ -109,6 +120,7 @@ struct TabGridView: View {
             Button("완료") { showGrid = false }
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.teal)
+                .frame(minHeight: DS.minTapTarget)
                 .padding(.leading, 18)
 
             Spacer()
@@ -124,18 +136,16 @@ struct TabGridView: View {
             Spacer()
 
             Button {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    tabManager.closeAllTabs()
-                }
-                showGrid = false
+                showCloseAllConfirm = true
             } label: {
                 Text("모두 닫기")
                     .font(.system(size: 14))
                     .foregroundStyle(.red)
+                    .frame(minHeight: DS.minTapTarget)
             }
             .padding(.trailing, 18)
         }
-        .padding(.vertical, 14)
+        .padding(.vertical, 4)
         .background(.ultraThinMaterial)
         .overlay(alignment: .bottom) {
             Divider()
@@ -158,8 +168,10 @@ struct TabGridView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.purple)
                 }
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, minHeight: DS.minTapTarget)
+                .contentShape(Rectangle())
             }
+            .accessibilityLabel("새 프라이빗 탭")
 
             // New tab (centre, prominent)
             Button {
@@ -177,22 +189,12 @@ struct TabGridView: View {
                 }
             }
             .frame(maxWidth: .infinity)
+            .accessibilityLabel("새 탭")
 
-            // Placeholder for symmetry (or add bookmark later)
-            Button {
-                // Reserved: Tab groups / bookmarks Phase 2
-            } label: {
-                VStack(spacing: 4) {
-                    Image(systemName: "square.on.square")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.secondary)
-                    Text("그룹")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .disabled(true)
+            // ★ v2.0.5: 동작하지 않던 "그룹" 버튼 제거 — 새 탭(+) 중앙 정렬 유지용 빈 칸
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: 1)
+                .accessibilityHidden(true)
         }
         .padding(.vertical, 10)
         .padding(.bottom, 8)
@@ -269,9 +271,15 @@ struct SamsungTabCard: View {
                 }
             .contentShape(Rectangle()) // ★ 전체 영역 터치 가능
             .onTapGesture { onSelect() }
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            // ★ v2.0.5: VoiceOver — 카드 본문만 버튼으로 노출 (닫기 버튼은 별도 요소)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(tab.isPrivate ? "프라이빗 탭, " : "")\(tab.displayTitle)")
+            .accessibilityValue(isActive ? "현재 탭" : "")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { onSelect() }
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: DS.Radius.card)
                     .stroke(
                         isActive ? Color.teal : Color(.separator).opacity(0.5),
                         lineWidth: isActive ? 2 : 0.5
@@ -285,8 +293,11 @@ struct SamsungTabCard: View {
                     .font(.system(size: 20))
                     .foregroundStyle(.secondary)
                     .background(Circle().fill(Color(.systemBackground)).padding(3))
+                    // ★ v2.0.5: 아이콘 크기는 유지, 터치 영역만 44pt로 확대
+                    .frame(width: DS.minTapTarget, height: DS.minTapTarget)
+                    .contentShape(Rectangle())
             }
-            .padding(6)
+            .accessibilityLabel("탭 닫기")
         }
     }
 }
