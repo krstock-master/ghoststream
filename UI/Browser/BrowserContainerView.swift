@@ -619,6 +619,7 @@ struct BrowserContainerView: View {
         let types = WKWebsiteDataStore.allWebsiteDataTypes()
         // ★ 기본 + 공유 데이터 스토어 모두 삭제
         WKWebsiteDataStore.default().removeData(ofTypes: types, modifiedSince: .distantPast) {}
+        downloadManager.clearSessionData()  // ★ v2.0.5: 다운로드용 쿠키/UA 캐시도 삭제
         tabManager.sharedDataStore.removeData(ofTypes: types, modifiedSince: .distantPast) {
             DispatchQueue.main.async { [self] in
                 tabManager.closeAllTabs()

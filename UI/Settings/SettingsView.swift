@@ -134,7 +134,10 @@ struct SettingsView: View {
 
     private func clearBrowsingData() {
         let types = WKWebsiteDataStore.allWebsiteDataTypes()
-        WKWebsiteDataStore.default().removeData(ofTypes: types, modifiedSince: .distantPast) {
+        WKWebsiteDataStore.default().removeData(ofTypes: types, modifiedSince: .distantPast) {}
+        container.downloadManager.clearSessionData()
+        // ★ v2.0.5: 일반 탭이 실제로 쓰는 공유 스토어도 삭제 (기존엔 default만 지워 쿠키가 남음)
+        container.tabManager.sharedDataStore.removeData(ofTypes: types, modifiedSince: .distantPast) {
             NotificationCenter.default.post(name: .downloadCompleted, object: "브라우징 데이터를 삭제했습니다")
         }
     }
