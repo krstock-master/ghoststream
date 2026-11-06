@@ -52,8 +52,12 @@ enum DiagnosticMode {
     }
 
     /// OHTTP 네트워크 릴레이 (프록시)
+    /// ★ v2.0.5: RelayManager.isAvailable == false 인 동안 항상 false (기능 비활성)
     static var relayEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: "diag.relay") as? Bool ?? false }
+        get {
+            guard RelayManager.isAvailable else { return false }
+            return UserDefaults.standard.object(forKey: "diag.relay") as? Bool ?? false
+        }
         set { UserDefaults.standard.set(newValue, forKey: "diag.relay") }
     }
 
@@ -66,6 +70,14 @@ enum DiagnosticMode {
     /// 앱 시작 시 1회 실행 — CF를 방해하는 기능을 강제로 끔
     /// (기존 사용자는 UserDefaults에 true가 저장되어 있어 기본값이 적용되지 않음)
     static func applyCFSafetyMigration() {
+        // ★ v2.0.5: 동작하지 않던 IP 보호(릴레이) 설정을 모든 사용자에게서 끈다
+        let relayKey = "diag.relayRemovalMigration.v1"
+        if !UserDefaults.standard.bool(forKey: relayKey) {
+            UserDefaults.standard.set(false, forKey: "diag.relay")
+            UserDefaults.standard.removeObject(forKey: "relayProvider")
+            UserDefaults.standard.removeObject(forKey: "customRelayURL")
+            UserDefaults.standard.set(true, forKey: relayKey)
+        }
         let key = "diag.cfSafetyMigration.v2"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         cfHandlingEnabled = false

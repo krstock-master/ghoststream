@@ -6,15 +6,23 @@ import Foundation
 import Network
 import WebKit
 
-/// 네트워크 릴레이를 통해 IP를 보호합니다 (iOS 17+).
+/// 네트워크 릴레이 (iOS 17+ ProxyConfiguration) — ★ v2.0.5부터 비활성(숨김)
 ///
-/// 원리: 사용자 → 릴레이 서버 → 목적지
-/// - 릴레이는 사용자 IP를 알지만 목적지 콘텐츠는 볼 수 없음 (암호화)
-/// - 목적지는 콘텐츠를 보지만 사용자 IP는 릴레이 IP로 대체됨
-/// - Apple Private Relay와 동일한 이중 홉 원리
+/// 정직성 메모: 이 기능은 실제로 동작한 적이 없다.
+/// - `relay.privaterelay.fastly.com`은 우리가 운영하거나 계약한 릴레이가 아니며, 인증 없이
+///   쓸 수 있는 공개 MASQUE 릴레이로 확인된 적이 없다 (Private Relay 홉은 Apple 인증 필요).
+/// - `allowFailover = true` 때문에 릴레이 연결이 실패하면 조용히 직접 연결로 돌아가,
+///   사용자는 "IP 보호 켜짐"을 보지만 실제 IP가 그대로 노출됐다.
+/// - "연결 테스트"도 URLSession.shared(WebView와 다른 네트워크 경로)로 ipify를 조회해
+///   릴레이 여부를 검증하지 못했다.
+/// 실제로 운영되는 릴레이(MASQUE/HTTP3 CONNECT, 인증 포함)가 생기기 전까지
+/// `isAvailable = false`로 UI에서 숨기고 어떤 경로로도 적용되지 않게 한다.
 @Observable
 final class RelayManager: @unchecked Sendable {
     static let shared = RelayManager()
+
+    /// 실제로 작동하는 릴레이가 준비되기 전까지 false. (UI 노출 여부도 이 값으로 결정)
+    static let isAvailable = false
 
     enum RelayProvider: String, CaseIterable {
         case disabled = "사용 안 함"
@@ -24,7 +32,7 @@ final class RelayManager: @unchecked Sendable {
         var relayURL: String {
             switch self {
             case .disabled: return ""
-            case .fastly: return "https://relay.privaterelay.fastly.com"
+            case .fastly: return ""  // ★ 공개 릴레이 아님 — 가짜 URL 제거 (v2.0.5)
             case .custom: return ""
             }
         }
@@ -46,7 +54,7 @@ final class RelayManager: @unchecked Sendable {
         set { UserDefaults.standard.set(newValue, forKey: "customRelayURL") }
     }
 
-    var isEnabled: Bool { activeProvider != .disabled }
+    var isEnabled: Bool { Self.isAvailable && activeProvider != .disabled }
 
     /// 현재 설정에 맞는 ProxyConfiguration을 생성합니다.
     /// nil을 반환하면 릴레이 미사용 (직접 연결).
@@ -63,7 +71,7 @@ final class RelayManager: @unchecked Sendable {
             urlString = customRelayURL
         }
 
-        guard let url = URL(string: urlString) else { return nil }
+        guard !urlString.isEmpty, let url = URL(string: urlString) else { return nil }
 
         // HTTP/3 릴레이 홉 생성
         let relayEndpoint = NWEndpoint.url(url)

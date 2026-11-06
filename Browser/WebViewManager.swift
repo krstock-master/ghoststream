@@ -17,7 +17,9 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     var lastUserInteraction: TimeInterval = 0  // ★ 사용자 제스처 시각 (납치광고 차단용)
     var cfChallengeActive: Bool = false  // ★ CF 챌린지 진행 중 (리다이렉트 차단 해제)
     static var programmaticNavigationUntil: TimeInterval = 0  // ★ 앱이 직접 시작한 네비게이션 표시
-    private var handledDomains: Set<String> = []
+    /// ★ 현재(가장 최근) 메인 프레임 응답이 CF 챌린지였는지 — navigationResponse 헤더 기준
+    ///   (cf-mitigated: challenge). 이 문서에는 어떤 JS도 넣지 않는다.
+    private(set) var cfChallengeResponse = false
     private var reloadPending = false
     private var pendingContextImageURL: URL? // ★ F3: 이미지 꾹 눌러서 저장용
     init(tab: Tab, privacyEngine: PrivacyEngine, onMediaDetected: @escaping (DetectedMedia) -> Void) {
@@ -25,6 +27,8 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     }
     // MARK: - Navigation
     func webView(_ w: WKWebView, didStartProvisionalNavigation n: WKNavigation!) {
+        // 새 네비게이션 — 응답 헤더를 받기 전까지는 CF 여부 미정
+        cfChallengeResponse = false
         tab.isLoading = true; tab.isSecure = w.url?.scheme == "https"; tab.privacyReport.isHTTPS = tab.isSecure
         // 네비게이션 시작 시에도 canGoBack/Forward 즉시 갱신
         tab.canGoBack = w.canGoBack; tab.canGoForward = w.canGoForward
@@ -43,6 +47,12 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         w.takeSnapshot(with: config) { [weak self] image, _ in
             DispatchQueue.main.async { self?.tab.thumbnail = image }
         }
+        // ★ 응답 헤더로 CF 챌린지가 확인된 문서 → 아무것도 주입하지 않고 끝 (요소 숨김 CSS 포함)
+        //   (핑거프린팅 방어 금지, CF 자동 처리 reload도 금지 → 루프 원천 차단)
+        if cfChallengeResponse {
+            cfChallengeActive = true
+            return
+        }
         // Reapply element hider rules (host+path 기반)
         if let host = w.url?.host {
             let rules = ElementHiderStore.shared.rules(for: host, path: w.url?.path)
@@ -51,38 +61,12 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
                 w.evaluateJavaScript("var s=document.createElement('style');s.textContent='\(escapedCSS){display:none!important}';document.head.appendChild(s);")
             }
         }
-        let host = w.url?.host ?? ""
         // ★ 진단: CF 자동 처리 꺼짐 → 리로드/스크립트 제거는 하지 않음
         //   단, 핑거프린팅 방어는 CF 페이지에 절대 주입하면 안 된다.
         //   (Canvas/WebGL 스푸핑이 CF에게 봇 신호로 잡힘)
+        //   v2.0.5: 도메인당 1회 → 매 페이지 로드마다 (CF가 아닐 때만)
         guard DiagnosticMode.cfHandlingEnabled else {
-            guard DiagnosticMode.fingerprintDefenseEnabled,
-                  !handledDomains.contains(host) else { return }
-            w.evaluateJavaScript("""
-            (function(){
-                var t = document.title || '';
-                var h = location.hostname || '';
-                var sig = (typeof window._cf_chl_opt !== 'undefined')
-                    || (typeof window.__CF$cv$params !== 'undefined')
-                    || !!document.querySelector('script[src*="/cdn-cgi/challenge-platform/"]')
-                    || !!document.querySelector('iframe[src*="challenges.cloudflare.com"]')
-                    || !!document.querySelector('#challenge-form,#challenge-stage,#challenge-running,.cf-turnstile,#cf-wrapper,.cf-browser-verification');
-                var isCF = (sig
-                    || t === 'Just a moment...'
-                    || t.indexOf('Checking your browser') !== -1
-                    || t.indexOf('Attention Required') !== -1
-                    || t.indexOf('보안 확인') !== -1
-                    || h.indexOf('challenges.cloudflare.com') !== -1);
-                return isCF ? '1' : '0';
-            })()
-            """) { [weak self, weak w] result, _ in
-                guard let self = self, let w = w,
-                      let s = result as? String, s == "0" else { return }
-                if let fp = self.privacyEngine.fingerprintDefenseScript {
-                    w.evaluateJavaScript(fp)
-                }
-                self.handledDomains.insert(host)
-            }
+            injectFingerprintDefenseIfSafe(w)
             return
         }
         guard !reloadPending else {
@@ -141,16 +125,82 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             } else {
                 // ★ CF 아닌 정상 페이지 도달 → 챌린지 종료
                 self.cfChallengeActive = false
-                if !self.handledDomains.contains(host) {
-                    // 비CF + 처음 방문 → 핑거프린팅 방어 주입 (진단 토글)
-                    if DiagnosticMode.fingerprintDefenseEnabled,
-                       let fp = self.privacyEngine.fingerprintDefenseScript {
-                        w.evaluateJavaScript(fp)
-                    }
-                    self.handledDomains.insert(host)
-                }
+                // 비CF 페이지 → 매 로드마다 핑거프린팅 방어 주입 (진단 토글)
+                self.injectFingerprintDefenseIfSafe(w)
             }
         }
+    }
+
+    // MARK: - Fingerprint defense (매 페이지, CF 페이지 제외)
+    /// CF 신호 확인과 주입을 **한 번의 evaluateJavaScript 안에서** 수행한다.
+    /// (확인 후 별도 호출로 주입하면 그 사이 문서가 바뀌는 경쟁 조건이 생김)
+    /// window.__gsFP 가드로 같은 문서에 이중 주입(프로토타입 이중 래핑)을 막는다.
+    private func injectFingerprintDefenseIfSafe(_ w: WKWebView) {
+        guard DiagnosticMode.fingerprintDefenseEnabled, !cfChallengeResponse,
+              let fp = privacyEngine.fingerprintDefenseScript else { return }
+        w.evaluateJavaScript("""
+        (function(){
+            var t = document.title || '';
+            var h = location.hostname || '';
+            var sig = (typeof window._cf_chl_opt !== 'undefined')
+                || (typeof window.__CF$cv$params !== 'undefined')
+                || !!document.querySelector('script[src*="/cdn-cgi/challenge-platform/"]')
+                || !!document.querySelector('iframe[src*="challenges.cloudflare.com"]')
+                || !!document.querySelector('#challenge-form,#challenge-stage,#challenge-running,.cf-turnstile,#cf-wrapper,.cf-browser-verification');
+            var isCF = (sig
+                || t === 'Just a moment...'
+                || t.indexOf('Checking your browser') !== -1
+                || t.indexOf('Attention Required') !== -1
+                || t.indexOf('보안 확인') !== -1
+                || h.indexOf('challenges.cloudflare.com') !== -1);
+            if (isCF) return '1';
+            if (window.__gsFP) return '2';
+            window.__gsFP = true;
+            \(fp)
+            return '0';
+        })()
+        """)
+    }
+
+    // MARK: - CF challenge detection by response header
+    /// Cloudflare가 챌린지 페이지를 응답할 때 붙이는 문서화된 헤더: `cf-mitigated: challenge`.
+    /// 보조 신호: Server: cloudflare + 403/503 + HTML (구형 IUAM/차단 페이지).
+    /// 차단 페이지를 CF로 오인해도 결과는 "그 문서에 스크립트 미주입"뿐이라 무해하다.
+    static func isCloudflareChallenge(_ response: URLResponse) -> Bool {
+        guard let http = response as? HTTPURLResponse else { return false }
+        if let mitigated = http.value(forHTTPHeaderField: "cf-mitigated"),
+           mitigated.lowercased().contains("challenge") {
+            return true
+        }
+        let server = http.value(forHTTPHeaderField: "Server")?.lowercased() ?? ""
+        let mime = http.mimeType?.lowercased() ?? ""
+        return server.contains("cloudflare")
+            && (http.statusCode == 403 || http.statusCode == 503)
+            && mime.contains("html")
+    }
+
+    /// 메인 프레임 응답마다 호출: CF 챌린지 문서면 user script를 전부 빼고,
+    /// 아니면 (진단 토글이 켜져 있을 때) earlyJS/mainJS를 복원한다.
+    /// - 결정 핸들러 호출 **전에** 실행 → 커밋될 새 문서의 documentStart 주입에 반영됨.
+    /// - reload/load/취소를 절대 하지 않는다 (상태만 맞춤) → 루프 불가.
+    /// - 이미 원하는 상태면 아무것도 안 함 (멱등).
+    private func applyUserScriptPolicy(to w: WKWebView, isCFChallenge: Bool) {
+        cfChallengeResponse = isCFChallenge
+        let uc = w.configuration.userContentController
+        if isCFChallenge {
+            cfChallengeActive = true
+            if !uc.userScripts.isEmpty { uc.removeAllUserScripts() }
+            return
+        }
+        // CF 자동 처리(진단, 기본 OFF)가 reload를 진행 중이면 그쪽이 스크립트를 관리한다
+        guard DiagnosticMode.contentScriptsEnabled, !reloadPending else { return }
+        let sources = uc.userScripts.map { $0.source }
+        let hasEarly = sources.contains(PrivacyScripts.earlyJS)
+        let hasMain = sources.contains(PrivacyScripts.mainJS)
+        guard !(hasEarly && hasMain) else { return }
+        uc.removeAllUserScripts()
+        uc.addUserScript(WKUserScript(source: PrivacyScripts.earlyJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        uc.addUserScript(WKUserScript(source: PrivacyScripts.mainJS, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
     }
     func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
     func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: any Error) { tab.isLoading = false }
@@ -177,6 +227,12 @@ final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
 
     // MARK: - Intercept media responses → WKDownload
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        // ★ v2.0.5: CF 챌린지 응답(cf-mitigated: challenge) → 이 문서에는 user script 없음.
+        //   정책 결정(.allow 등)은 아래 기존 로직 그대로 — 여기서는 취소/리로드하지 않는다.
+        if navigationResponse.isForMainFrame {
+            applyUserScriptPolicy(to: webView,
+                                  isCFChallenge: Self.isCloudflareChallenge(navigationResponse.response))
+        }
         let url = navigationResponse.response.url
         let mime = navigationResponse.response.mimeType ?? ""
         let ext = url?.pathExtension.lowercased() ?? ""
