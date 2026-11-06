@@ -55,6 +55,10 @@
     <string>앱 잠금 기능을 위해 Face ID를 사용합니다.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>다운로드한 사진과 영상을 사진 앱에 저장하기 위해 접근 권한이 필요합니다.</string>
+    <key>UIFileSharingEnabled</key>
+    <true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>다운로드한 미디어를 사진 앱에 추가합니다.</string>
     <key>NSUserTrackingUsageDescription</key>

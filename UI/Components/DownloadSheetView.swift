@@ -148,19 +148,33 @@ struct DownloadsManagerView: View {
                 Text("완료").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    var count = 0
-                    for dl in dm.completedDownloads {
+                    // ★ v2.0.5: 실제 성공 개수 집계 (사진 앱 미지원 형식 제외, 이미 저장한 것 제외)
+                    let targets = dm.completedDownloads.filter { dl in
+                        guard let url = dl.localURL else { return false }
+                        return Self.isPhotosCompatible(url) && !savedToGallery.contains(dl.id.uuidString)
+                    }
+                    let skipped = dm.completedDownloads.count - targets.count
+                    guard !targets.isEmpty else {
+                        NotificationCenter.default.post(name: .downloadFailed, object: "사진 앱에 저장할 새 항목이 없습니다")
+                        return
+                    }
+                    let group = DispatchGroup()
+                    var ok = 0
+                    for dl in targets {
                         guard let url = dl.localURL else { continue }
-                        let ext = url.pathExtension.lowercased()
-                        let isMedia = ["mp4","m4v","mov","webm","jpg","jpeg","png","webp","heic","gif"].contains(ext)
-                        if isMedia && !savedToGallery.contains(dl.id.uuidString) {
-                            saveToGallery(url: url, type: dl.media.type)
-                            savedToGallery.insert(dl.id.uuidString)
-                            count += 1
+                        group.enter()
+                        saveToGallery(url: url, type: dl.media.type) { success in
+                            if success { ok += 1; savedToGallery.insert(dl.id.uuidString) }
+                            group.leave()
                         }
                     }
-                    NotificationCenter.default.post(name: .downloadCompleted,
-                        object: "\(count)개를 사진 앱에 저장했습니다")
+                    group.notify(queue: .main) {
+                        let fail = targets.count - ok
+                        var msg = "\(ok)개를 사진 앱에 저장했습니다"
+                        if fail > 0 { msg += " · \(fail)개 실패" }
+                        if skipped > 0 { msg += " · \(skipped)개 제외(미지원/저장됨)" }
+                        NotificationCenter.default.post(name: fail > 0 ? .downloadFailed : .downloadCompleted, object: msg)
+                    }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "photo.badge.arrow.down")
@@ -207,16 +221,16 @@ struct DownloadsManagerView: View {
                 }
                 // Action buttons
                 if let url = dl.localURL {
-                    // ★ F3 FIX: 영상/이미지는 downloadDidFinish에서 자동 갤러리 저장됨
-                    let ext = url.pathExtension.lowercased()
-                    let autoSaved = ["mp4","m4v","mov","webm","jpg","jpeg","png","webp","heic","gif"].contains(ext)
+                    // ★ v2.0.5: 자동 저장 경로는 없음 → 실제로 저장한 항목만 '저장됨'
+                    let autoSaved = false
 
                     HStack(spacing: 10) {
                         Button {
-                            if !autoSaved {
-                                saveToGallery(url: url, type: dl.media.type)
+                            saveToGallery(url: url, type: dl.media.type) { success in
+                                if success { savedToGallery.insert(dl.id.uuidString) }
+                                NotificationCenter.default.post(name: success ? .downloadCompleted : .downloadFailed,
+                                    object: success ? "사진 앱에 저장했습니다" : "사진 앱에 저장하지 못했습니다")
                             }
-                            savedToGallery.insert(dl.id.uuidString)
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: (autoSaved || savedToGallery.contains(dl.id.uuidString)) ? "checkmark" : "photo.badge.arrow.down")
@@ -302,17 +316,28 @@ struct DownloadsManagerView: View {
                 Text("\(files.count)개 파일").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    var count = 0
-                    for url in files {
-                        let ext = url.pathExtension.lowercased()
-                        if ["mp4","m4v","mov","webm","jpg","jpeg","png","webp","heic","gif"].contains(ext) {
-                            saveToGallery(url: url, type: detectType(url))
-                            count += 1
+                    // ★ v2.0.5: 이미 사진 앱에 저장한 파일은 건너뜀(중복 방지) + 실제 결과 집계
+                    let targets = files.filter {
+                        Self.isPhotosCompatible($0) && GalleryAssetTracker.shared.assetID(for: $0.lastPathComponent) == nil
+                    }
+                    guard !targets.isEmpty else {
+                        NotificationCenter.default.post(name: .downloadFailed, object: "사진 앱에 저장할 새 파일이 없습니다")
+                        return
+                    }
+                    let group = DispatchGroup()
+                    var ok = 0
+                    for url in targets {
+                        group.enter()
+                        saveToGallery(url: url, type: detectType(url)) { success in
+                            if success { ok += 1 }
+                            group.leave()
                         }
                     }
-                    // ★ 토스트 피드백
-                    NotificationCenter.default.post(name: .downloadCompleted,
-                        object: "\(count)개 파일을 사진 앱에 저장했습니다")
+                    group.notify(queue: .main) {
+                        let fail = targets.count - ok
+                        let msg = fail > 0 ? "\(ok)개 저장 · \(fail)개 실패" : "\(ok)개 파일을 사진 앱에 저장했습니다"
+                        NotificationCenter.default.post(name: fail > 0 ? .downloadFailed : .downloadCompleted, object: msg)
+                    }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "photo.badge.arrow.down")
@@ -532,87 +557,74 @@ struct DownloadsManagerView: View {
         }
     }
 
-    private func saveToGallery(url: URL, type: DetectedMedia.MediaType) {
+    /// 사진 앱이 받아들이는 형식인지 (webm/ts/mkv 등은 Photos가 거부)
+    static func isPhotosCompatible(_ url: URL) -> Bool {
         let ext = url.pathExtension.lowercased()
-        let isVideoFile = ["mp4","m4v","mov","webm"].contains(ext)
-        let isImageFile = ["jpg","jpeg","png","webp","heic","gif"].contains(ext)
+        if ["jpg","jpeg","png","webp","heic","heif","gif"].contains(ext) { return true }
+        if ["mp4","m4v","mov"].contains(ext) { return UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(url.path) }
+        if ext == "movpkg" { return true }
+        return false
+    }
 
-        // Step 1: if .movpkg, export to .mp4 first, then recursively save
+    /// ★ v2.0.5: 결과를 completion으로 보고 (completion이 nil이면 개별 토스트).
+    ///   - 이미지는 원본 파일 그대로 추가 (pngData 재인코딩 금지 → 방향/용량/애니메이션 보존)
+    ///   - 생성된 PHAsset ID를 GalleryAssetTracker에 기록 → 보안 폴더 이동 시 그 에셋만 삭제
+    private func saveToGallery(url: URL, type: DetectedMedia.MediaType, completion: ((Bool) -> Void)? = nil) {
+        let ext = url.pathExtension.lowercased()
+        let report: (Bool, String) -> Void = { ok, msg in
+            DispatchQueue.main.async {
+                if let completion { completion(ok); return }
+                NotificationCenter.default.post(name: ok ? .downloadCompleted : .downloadFailed, object: msg)
+            }
+        }
         if ext == "movpkg" {
-            exportMovpkgThenSave(movpkgURL: url, type: type)
+            exportMovpkgThenSave(movpkgURL: url, type: type, completion: completion)
             return
         }
-
+        guard Self.isPhotosCompatible(url) else {
+            report(false, "사진 앱이 지원하지 않는 형식입니다 (.\(ext)) — 파일 앱에서 열어 주세요")
+            return
+        }
+        guard FileManager.default.fileExists(atPath: url.path),
+              ((try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0) > 0 else {
+            report(false, "파일이 비어있거나 존재하지 않습니다")
+            return
+        }
+        let isVideo = ["mp4","m4v","mov"].contains(ext)
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else {
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(name: .downloadFailed, object: "사진 앱 접근 권한이 필요합니다")
-                }
+                report(false, "사진 앱 접근 권한이 필요합니다")
                 return
             }
-
-            if isVideoFile {
-                // Check file exists and has content before saving
-                guard FileManager.default.fileExists(atPath: url.path),
-                      (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0 > 0 else {
+            var assetID: String?
+            PHPhotoLibrary.shared().performChanges({
+                let req = PHAssetCreationRequest.forAsset()
+                req.addResource(with: isVideo ? .video : .photo, fileURL: url, options: nil)
+                assetID = req.placeholderForCreatedAsset?.localIdentifier
+            }) { success, error in
+                if success, let assetID {
                     DispatchQueue.main.async {
-                        NotificationCenter.default.post(name: .downloadFailed, object: "파일이 비어있거나 존재하지 않습니다")
-                    }
-                    return
-                }
-                // Use PHPhotoLibrary for better error handling
-                PHPhotoLibrary.shared().performChanges({
-                    let req = PHAssetCreationRequest.forAsset()
-                    req.addResource(with: .video, fileURL: url, options: nil)
-                }) { success, error in
-                    DispatchQueue.main.async {
-                        if success {
-                            NotificationCenter.default.post(name: .downloadCompleted, object: "사진 앱에 저장했습니다")
-                        } else {
-                            // Fallback to UIKit API
-                            UISaveVideoAtPathToSavedPhotosAlbum(url.path, nil, nil, nil)
-                            NotificationCenter.default.post(name: .downloadCompleted, object: "사진 앱에 저장했습니다")
-                        }
+                        GalleryAssetTracker.shared.track(filename: url.lastPathComponent, assetID: assetID)
                     }
                 }
-            } else if isImageFile {
-                if ext == "gif", let data = try? Data(contentsOf: url) {
-                    // GIF via PHPhotoLibrary to preserve animation
-                    PHPhotoLibrary.shared().performChanges({
-                        let req = PHAssetCreationRequest.forAsset()
-                        req.addResource(with: .photo, data: data, options: nil)
-                    }) { success, error in
-                        DispatchQueue.main.async {
-                            if success {
-                                NotificationCenter.default.post(name: .downloadCompleted, object: "GIF를 사진 앱에 저장했습니다")
-                            } else {
-                                NotificationCenter.default.post(name: .downloadFailed, object: error?.localizedDescription ?? "GIF 저장 실패")
-                            }
-                        }
-                    }
-                } else if let image = UIImage(contentsOfFile: url.path) {
-                    PHPhotoLibrary.shared().performChanges({
-                        PHAssetCreationRequest.forAsset().addResource(with: .photo, data: image.pngData() ?? Data(), options: nil)
-                    }) { success, error in
-                        DispatchQueue.main.async {
-                            if success {
-                                NotificationCenter.default.post(name: .downloadCompleted, object: "이미지를 사진 앱에 저장했습니다")
-                            } else {
-                                NotificationCenter.default.post(name: .downloadFailed, object: error?.localizedDescription ?? "이미지 저장 실패")
-                            }
-                        }
-                    }
-                }
+                report(success, success ? "사진 앱에 저장했습니다"
+                                        : (error?.localizedDescription ?? "사진 앱 저장 실패"))
             }
         }
     }
 
-    private func exportMovpkgThenSave(movpkgURL: URL, type: DetectedMedia.MediaType) {
+    private func exportMovpkgThenSave(movpkgURL: URL, type: DetectedMedia.MediaType, completion: ((Bool) -> Void)? = nil) {
+        let fail: () -> Void = {
+            DispatchQueue.main.async {
+                if let completion { completion(false); return }
+                NotificationCenter.default.post(name: .downloadFailed, object: "영상 변환(MP4) 실패 — 사진 앱에 저장하지 못했습니다")
+            }
+        }
         let asset = AVURLAsset(url: movpkgURL)
         let supported = AVAssetExportSession.exportPresets(compatibleWith: asset)
         let preset = supported.contains(AVAssetExportPresetPassthrough)
             ? AVAssetExportPresetPassthrough : AVAssetExportPresetHighestQuality
-        guard let exp = AVAssetExportSession(asset: asset, presetName: preset) else { return }
+        guard let exp = AVAssetExportSession(asset: asset, presetName: preset) else { fail(); return }
         let dest = movpkgURL.deletingPathExtension().appendingPathExtension("mp4")
         if FileManager.default.fileExists(atPath: dest.path) {
             try? FileManager.default.removeItem(at: dest)
@@ -622,9 +634,9 @@ struct DownloadsManagerView: View {
         exp.shouldOptimizeForNetworkUse = true
         let destCopy = dest
         exp.exportAsynchronously {
-            guard exp.status == .completed else { return }
+            guard exp.status == .completed else { fail(); return }
             DispatchQueue.main.async {
-                UISaveVideoAtPathToSavedPhotosAlbum(destCopy.path, nil, nil, nil)
+                saveToGallery(url: destCopy, type: type, completion: completion)
             }
         }
     }
@@ -652,6 +664,9 @@ struct DownloadsManagerView: View {
 
     // ★ 보안폴더 이동 시 갤러리에서 해당 파일 삭제
     static func deleteFromPhotoLibrary(filename: String) async {
+        // 이 앱이 사진 앱에 저장한 기록이 없으면 아무것도 지우지 않음 (전체 사진 권한도 요청하지 않음)
+        let tracked = await MainActor.run { GalleryAssetTracker.shared.assetID(for: filename) }
+        guard tracked != nil else { return }
         let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         guard status == .authorized || status == .limited else {
             await MainActor.run {
@@ -672,35 +687,8 @@ struct DownloadsManagerView: View {
             GalleryAssetTracker.shared.remove(filename: filename)
         }
 
-        // ★ 2차: ID 추적 실패 시 최근 에셋에서 파일 크기 매칭
-        if toDelete.isEmpty {
-            let ext = (filename as NSString).pathExtension.lowercased()
-            let isVideo = ["mp4", "m4v", "mov", "webm"].contains(ext)
-            let fetchOptions = PHFetchOptions()
-            fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-            fetchOptions.fetchLimit = 5
-            let tenMinutesAgo = Date().addingTimeInterval(-600)
-            fetchOptions.predicate = NSPredicate(format: "creationDate > %@", tenMinutesAgo as NSDate)
-
-            let assets = PHAsset.fetchAssets(with: isVideo ? .video : .image, options: fetchOptions)
-            // 파일명 매칭 시도
-            let normalizedName = filename.lowercased().replacingOccurrences(of: " ", with: "_")
-            assets.enumerateObjects { asset, _, _ in
-                let resources = PHAssetResource.assetResources(for: asset)
-                for r in resources {
-                    let orig = r.originalFilename.lowercased().replacingOccurrences(of: " ", with: "_")
-                    if orig == normalizedName || orig.contains((filename as NSString).deletingPathExtension.lowercased()) {
-                        toDelete.append(asset)
-                        return
-                    }
-                }
-            }
-            // 최종 폴백: 가장 최근 에셋
-            if toDelete.isEmpty, let latest = assets.firstObject {
-                toDelete.append(latest)
-            }
-        }
-
+        // ★ v2.0.5: 추적된 에셋(이 앱이 저장한 것)만 삭제한다.
+        //   이전의 '최근 10분 에셋' 폴백은 사용자가 직접 찍은 사진을 지울 수 있어 제거.
         guard !toDelete.isEmpty else { return }
 
         do {
