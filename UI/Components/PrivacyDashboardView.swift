@@ -6,9 +6,9 @@ struct PrivacyDashboardView: View {
     @Environment(PrivacyEngine.self) private var privacyEngine
     @Environment(DNSManager.self) private var dns
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("blockTrackers") private var blockTrackers = true
-    @AppStorage("blockFingerprinting") private var blockFingerprinting = true
-    @AppStorage("blockAds") private var blockAds = true
+    // ★ v2.0.5: 실제 동작을 제어하는 DiagnosticMode 키에 바인딩 (구 blockAds/blockTrackers/blockFingerprinting 키는 미사용)
+    @AppStorage("diag.adBlock") private var adBlock = true
+    @AppStorage("diag.fingerprint") private var fingerprint = true
 
     var body: some View {
         NavigationStack {
@@ -40,6 +40,7 @@ struct PrivacyDashboardView: View {
             Image(systemName: allEnabled ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
                 .font(.system(size: 48))
                 .foregroundStyle(allEnabled ? .green : .orange)
+                .accessibilityHidden(true)
 
             Text(allEnabled ? "보호 중" : "일부 보호 꺼짐")
                 .font(.title3.bold())
@@ -50,7 +51,7 @@ struct PrivacyDashboardView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.panel))
     }
 
     // MARK: - Session Stats
@@ -83,7 +84,7 @@ struct PrivacyDashboardView: View {
             }
             .padding(12)
         }
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.panel))
     }
 
     private func statCell(icon: String, count: Int, label: String, color: Color) -> some View {
@@ -99,7 +100,8 @@ struct PrivacyDashboardView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
-        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: DS.Radius.card))
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Protection Toggles
@@ -111,15 +113,19 @@ struct PrivacyDashboardView: View {
             }.padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
 
             VStack(spacing: 1) {
-                toggleRow("광고 차단", "nosign", $blockAds, .red)
-                toggleRow("트래커 차단", "eye.slash.fill", $blockTrackers, .orange)
-                toggleRow("핑거프린팅 방어", "hand.raised.fill", $blockFingerprinting, .purple)
+                toggleRow("광고·트래커 차단", "nosign", $adBlock, .red)
+                toggleRow("핑거프린팅 방어", "hand.raised.fill", $fingerprint, .purple)
                 infoRow("쿠키 배너 자동 거부", "xmark.shield.fill", .teal)
-                infoRow("제로 텔레메트리", "antenna.radiowaves.left.and.right.slash", .green)
+                infoRow("사용 데이터 수집 안 함", "antenna.radiowaves.left.and.right.slash", .green)
             }
-            .padding(.horizontal, 12).padding(.bottom, 12)
+            .padding(.horizontal, 12).padding(.bottom, 4)
+
+            Text("변경 사항은 새로 여는 탭부터 적용됩니다.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16).padding(.bottom, 12)
         }
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.panel))
     }
 
     private func toggleRow(_ title: String, _ icon: String, _ binding: Binding<Bool>, _ color: Color) -> some View {
@@ -130,6 +136,8 @@ struct PrivacyDashboardView: View {
             Toggle("", isOn: binding).labelsHidden().tint(.green)
         }
         .padding(.vertical, 10).padding(.horizontal, 12)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
     }
 
     private func infoRow(_ title: String, _ icon: String, _ color: Color) -> some View {
@@ -137,9 +145,10 @@ struct PrivacyDashboardView: View {
             Image(systemName: icon).foregroundStyle(color).frame(width: 24)
             Text(title).font(.subheadline)
             Spacer()
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
+            Text("항상 켜짐").font(.caption).foregroundStyle(.secondary)
         }
         .padding(.vertical, 10).padding(.horizontal, 12)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - DNS
@@ -151,20 +160,24 @@ struct PrivacyDashboardView: View {
             }.padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
 
             HStack(spacing: 12) {
+                let encrypted = !dns.activeProvider.serverURL.isEmpty
                 Image(systemName: "network.badge.shield.half.filled").foregroundStyle(.teal).frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(dns.activeProvider.rawValue).font(.subheadline)
-                    if !dns.activeProvider.serverURL.isEmpty {
-                        Text("암호화된 DNS 쿼리").font(.caption2).foregroundStyle(.secondary)
-                    }
+                    Text(encrypted ? "암호화된 DNS 사용 중" : "암호화되지 않음 · 설정에서 변경")
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
+                // ★ v2.0.5: 시스템 기본 DNS일 때도 초록 체크가 표시되던 문제 수정
+                Image(systemName: encrypted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .foregroundStyle(encrypted ? .green : .orange).font(.caption)
+                    .accessibilityHidden(true)
             }
             .padding(12)
+            .accessibilityElement(children: .combine)
         }
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.panel))
     }
 
-    private var allEnabled: Bool { blockTrackers && blockFingerprinting && blockAds }
+    private var allEnabled: Bool { adBlock && fingerprint }
 }
