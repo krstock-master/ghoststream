@@ -11,6 +11,7 @@ struct ReaderModeView: View {
     @AppStorage("readerFontSize") private var fontSize: Double = 18
     @AppStorage("readerTheme") private var theme: String = "auto"
     @State private var showSettings = false
+    @Environment(\.colorScheme) private var systemScheme
 
     var body: some View {
         NavigationStack {
@@ -23,7 +24,7 @@ struct ReaderModeView: View {
 
                     if let host = url?.host {
                         Text(host)
-                            .font(.system(size: 13)).foregroundStyle(.secondary)
+                            .font(.footnote).foregroundStyle(.secondary)
                     }
 
                     Divider()
@@ -38,6 +39,8 @@ struct ReaderModeView: View {
                 .padding(.vertical, 20)
             }
             .background(readerBackground)
+            // ★ v2.0.5: 세피아/다크 테마에서 글자색이 배경과 맞지 않던 문제 (라이트 모드에서 다크 테마 → 검은 글씨)
+            .environment(\.colorScheme, readerScheme)
             .navigationTitle("리더 모드")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -46,6 +49,7 @@ struct ReaderModeView: View {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 22)).foregroundStyle(.secondary)
                     }
+                    .accessibilityLabel("리더 모드 닫기")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -58,21 +62,27 @@ struct ReaderModeView: View {
                         }
                         Divider()
                         // Theme
-                        Button { theme = "auto" } label: {
-                            Label("시스템", systemImage: theme == "auto" ? "checkmark" : "")
-                        }
-                        Button { theme = "sepia" } label: {
-                            Label("세피아", systemImage: theme == "sepia" ? "checkmark" : "")
-                        }
-                        Button { theme = "dark" } label: {
-                            Label("다크", systemImage: theme == "dark" ? "checkmark" : "")
+                        // ★ v2.0.5: 빈 심볼 이름("") 대신 Picker로 선택 상태 표시
+                        Picker("테마", selection: $theme) {
+                            Text("시스템").tag("auto")
+                            Text("세피아").tag("sepia")
+                            Text("다크").tag("dark")
                         }
                     } label: {
                         Image(systemName: "textformat")
                             .font(.system(size: 16, weight: .medium))
                     }
+                    .accessibilityLabel("글꼴 및 테마")
                 }
             }
+        }
+    }
+
+    private var readerScheme: ColorScheme {
+        switch theme {
+        case "sepia": return .light
+        case "dark": return .dark
+        default: return systemScheme
         }
     }
 

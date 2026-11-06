@@ -65,21 +65,24 @@ final class FullscreenDownloadOverlay {
         win.isHidden = false
         overlayWindow = win
 
-        let bar = buildBar(screenBounds: scene.screen.bounds)
+        // ★ v2.0.5: 홈 인디케이터 높이를 하드코딩(34) 대신 실제 safe area에서 읽음 (SE 등 대응)
+        let safeBottom = scene.windows.first(where: { $0.isKeyWindow })?.safeAreaInsets.bottom ?? 34
+        let bar = buildBar(screenBounds: scene.screen.bounds, safeBottom: safeBottom)
         win.addSubview(bar)
 
         bar.alpha = 0
-        bar.transform = CGAffineTransform(translationX: 0, y: 80)
-        UIView.animate(withDuration: 0.35, delay: 0,
+        // ★ v2.0.5: 동작 줄이기 설정 시 슬라이드 없이 페이드만
+        let reduceMotion = UIAccessibility.isReduceMotionEnabled
+        bar.transform = reduceMotion ? .identity : CGAffineTransform(translationX: 0, y: 80)
+        UIView.animate(withDuration: reduceMotion ? 0.2 : 0.35, delay: 0,
                        usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
             bar.alpha = 1
             bar.transform = .identity
         }
     }
 
-    private func buildBar(screenBounds: CGRect) -> UIView {
+    private func buildBar(screenBounds: CGRect, safeBottom: CGFloat) -> UIView {
         let barH: CGFloat = 72
-        let safeBottom: CGFloat = 34
         let barY = screenBounds.height - barH - safeBottom
         let bar = UIView(frame: CGRect(x: 0, y: barY, width: screenBounds.width, height: barH + safeBottom))
 
@@ -95,8 +98,7 @@ final class FullscreenDownloadOverlay {
         bar.addSubview(stack)
 
         stack.addArrangedSubview(makeBtn(icon: "arrow.down.circle.fill", label: "저장", color: .systemTeal, action: #selector(tappedDownload)))
-        stack.addArrangedSubview(makeBtn(icon: "pip.fill", label: "PiP", color: .white, action: #selector(tappedClose)))
-        stack.addArrangedSubview(makeBtn(icon: "repeat", label: "반복", color: .white, action: #selector(tappedClose)))
+        // ★ v2.0.5: "PiP"/"반복" 버튼 제거 — 둘 다 닫기(tappedClose)에 연결되어 있어 오해를 유발
         stack.addArrangedSubview(makeBtn(icon: "xmark.circle.fill", label: "닫기", color: .systemRed.withAlphaComponent(0.8), action: #selector(tappedClose)))
 
         return bar

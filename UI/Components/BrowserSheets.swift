@@ -118,7 +118,7 @@ struct TabGridView: View {
     private var tabHeader: some View {
         HStack(spacing: 0) {
             Button("완료") { showGrid = false }
-                .font(.system(size: 16, weight: .semibold))
+                .font(.callout.weight(.semibold))
                 .foregroundStyle(.teal)
                 .frame(minHeight: DS.minTapTarget)
                 .padding(.leading, 18)
@@ -127,9 +127,9 @@ struct TabGridView: View {
 
             VStack(spacing: 1) {
                 Text("탭")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.callout.weight(.semibold))
                 Text("\(tabManager.tabs.count)개 열림")
-                    .font(.system(size: 11))
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
@@ -139,7 +139,7 @@ struct TabGridView: View {
                 showCloseAllConfirm = true
             } label: {
                 Text("모두 닫기")
-                    .font(.system(size: 14))
+                    .font(.subheadline)
                     .foregroundStyle(.red)
                     .frame(minHeight: DS.minTapTarget)
             }

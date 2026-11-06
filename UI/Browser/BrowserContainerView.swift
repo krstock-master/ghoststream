@@ -22,6 +22,9 @@ struct BrowserContainerView: View {
     @State private var isAddressEditing = false
     @State private var toastMessage: String?
     @State private var toastIsError = false
+    @State private var toastToken = UUID()      // ★ 이전 토스트의 타이머가 새 토스트를 일찍 닫지 않도록
+    @State private var snackbarToken = UUID()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // ★ Phase 1 신규 상태
     @State private var showFindInPage = false
     @State private var findText = ""
@@ -63,14 +66,21 @@ struct BrowserContainerView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .toolbarScrollDirection)) { n in
             if let compact = n.object as? Bool {
-                withAnimation(.easeInOut(duration: 0.2)) { isToolbarCompact = compact }
+                // ★ v2.0.5: 스크롤 중 같은 값이 반복 전달되면 애니메이션 트랜잭션을 만들지 않음
+                guard compact != isToolbarCompact else { return }
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { isToolbarCompact = compact }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .startImmediateDownload)) { n in
             if let media = n.object as? DetectedMedia {
                 latestMedia = media
-                withAnimation { showMediaSnackbar = true }
-                Task { try? await Task.sleep(for: .seconds(3)); withAnimation { showMediaSnackbar = false } }
+                let token = UUID(); snackbarToken = token
+                withAnimation(popAnimation) { showMediaSnackbar = true }
+                Task {
+                    try? await Task.sleep(for: .seconds(3))
+                    guard snackbarToken == token else { return }
+                    withAnimation(popAnimation) { showMediaSnackbar = false }
+                }
 
                 // ★ Route through WKWebView notification → coordinator handles startWKDownload
                 NotificationCenter.default.post(name: .wkDownloadRequested, object: media)
@@ -78,24 +88,25 @@ struct BrowserContainerView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .downloadCompleted)) { n in
             if let msg = n.object as? String {
-                toastIsError = false; toastMessage = msg
-                Task { try? await Task.sleep(for: .seconds(3)); withAnimation { toastMessage = nil } }
+                showToast(msg)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .downloadFailed)) { n in
             if let msg = n.object as? String {
-                toastIsError = true; toastMessage = msg
-                Task { try? await Task.sleep(for: .seconds(4)); withAnimation { toastMessage = nil } }
+                showToast(msg, isError: true, seconds: 4)
             }
         }
+        // ★ v2.0.5: .animation을 조건부 뷰 바깥(컨테이너)에 걸어야 등장 transition이 실제로 동작함
+        //   (기존: if 안쪽에 걸려 있어 토스트가 애니메이션 없이 갑자기 나타났음)
         .overlay(alignment: .top) {
+            VStack {
             if let toast = toastMessage {
                 HStack(spacing: 10) {
                     Image(systemName: toastIsError ? "xmark.circle.fill" : "checkmark.circle.fill")
                         .foregroundStyle(toastIsError ? .red : .green).font(.system(size: 18))
                     Text(toast).font(.subheadline.weight(.medium)).lineLimit(2)
                     Spacer()
-                    Button { withAnimation { toastMessage = nil } } label: {
+                    Button { withAnimation(popAnimation) { toastMessage = nil } } label: {
                         Image(systemName: "xmark").font(.caption.weight(.bold)).foregroundStyle(.secondary)
                             .frame(width: 32, height: 32).contentShape(Rectangle())
                     }
@@ -105,16 +116,20 @@ struct BrowserContainerView: View {
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.panel))
                 .shadow(color: .black.opacity(0.1), radius: 8, y: 4)
                 .padding(.horizontal, 16).padding(.top, 54)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .animation(.spring(response: 0.35), value: toastMessage)
+                .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+                .accessibilityElement(children: .contain)
             }
+            }
+            .animation(popAnimation, value: toastMessage)
         }
         .overlay(alignment: .bottom) {
+            VStack {
             if showMediaSnackbar, let media = latestMedia {
                 snackbar(media).padding(.horizontal, 16).padding(.bottom, isAddressEditing ? 12 : 130)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .animation(.spring(response: 0.35), value: showMediaSnackbar)
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
             }
+            }
+            .animation(popAnimation, value: showMediaSnackbar)
         }
         .sheet(isPresented: $showDownloads) { DownloadsManagerView() }
         .sheet(isPresented: $showSettings) { SettingsView() }
@@ -174,7 +189,7 @@ struct BrowserContainerView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.system(size: 15))
                     TextField("검색어 또는 주소 입력", text: $addressText)
-                        .textFieldStyle(.plain).font(.system(size: 16))
+                        .textFieldStyle(.plain).font(.callout)
                         .autocorrectionDisabled().textInputAutocapitalization(.never)
                         .keyboardType(.webSearch).submitLabel(.go)
                         .focused($isURLFieldFocused)
@@ -198,7 +213,7 @@ struct BrowserContainerView: View {
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: DS.Radius.card))
                 Button("취소") { closeSearch() }
-                    .font(.system(size: 16, weight: .medium)).foregroundStyle(.teal)
+                    .font(.callout.weight(.medium)).foregroundStyle(.teal)
                     .frame(minHeight: DS.minTapTarget)
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
@@ -208,7 +223,7 @@ struct BrowserContainerView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         if !container.bookmarkManager.bookmarks.isEmpty {
-                            Text("북마크").font(.system(size: 12, weight: .semibold))
+                            Text("북마크").font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 12)
                             ForEach(container.bookmarkManager.bookmarks.prefix(6)) { bm in
                                 Button {
@@ -222,8 +237,8 @@ struct BrowserContainerView: View {
                                         }
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(bm.title.isEmpty ? (bm.url.host ?? "") : bm.title)
-                                                .font(.system(size: 14, weight: .medium)).foregroundStyle(.primary).lineLimit(1)
-                                            Text(bm.url.host ?? "").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                                                .font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
+                                            Text(bm.url.host ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                         }
                                         Spacer()
                                     }
@@ -233,7 +248,7 @@ struct BrowserContainerView: View {
                         }
 
                         if !container.bookmarkManager.history.isEmpty {
-                            Text("최근 방문").font(.system(size: 12, weight: .semibold))
+                            Text("최근 방문").font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 12)
                             ForEach(container.bookmarkManager.history.prefix(5)) { h in
                                 Button {
@@ -243,8 +258,8 @@ struct BrowserContainerView: View {
                                         Image(systemName: "clock").foregroundStyle(.secondary).frame(width: 32)
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(h.title.isEmpty ? (h.url.host ?? "") : h.title)
-                                                .font(.system(size: 14)).foregroundStyle(.primary).lineLimit(1)
-                                            Text(h.url.host ?? "").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                                                .font(.subheadline).foregroundStyle(.primary).lineLimit(1)
+                                            Text(h.url.host ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                         }
                                         Spacer()
                                     }
@@ -270,9 +285,9 @@ struct BrowserContainerView: View {
                                 HStack(spacing: 10) {
                                     Image(systemName: "star.fill").foregroundStyle(.yellow).font(.system(size: 12))
                                     Text(bm.title.isEmpty ? bm.url.host ?? "" : bm.title)
-                                        .font(.system(size: 14)).foregroundStyle(.primary).lineLimit(1)
+                                        .font(.subheadline).foregroundStyle(.primary).lineLimit(1)
                                     Spacer()
-                                    Text(bm.url.host ?? "").font(.system(size: 12)).foregroundStyle(.secondary)
+                                    Text(bm.url.host ?? "").font(.caption).foregroundStyle(.secondary)
                                 }
                                 .padding(.horizontal, 16).padding(.vertical, 10)
                             }
@@ -303,7 +318,7 @@ struct BrowserContainerView: View {
         Button {
             // ★ WKDownload 경로로 — URLSession 대신 브라우저 세션 사용
             NotificationCenter.default.post(name: .wkDownloadRequested, object: media)
-            withAnimation { showMediaSnackbar = false }
+            withAnimation(popAnimation) { showMediaSnackbar = false }
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "arrow.down.circle.fill").foregroundStyle(.teal).font(.title3)
@@ -328,14 +343,15 @@ struct BrowserContainerView: View {
                 GeometryReader { geo in
                     Rectangle().fill(LinearGradient(colors: [.teal, .cyan], startPoint: .leading, endPoint: .trailing))
                         .frame(width: geo.size.width * (tabManager.activeTab?.loadProgress ?? 0), height: 2.5)
-                        .animation(.easeInOut(duration: 0.2), value: tabManager.activeTab?.loadProgress)
+                        // ★ v2.0.5: 진행률은 수시로 바뀌므로 짧은 linear + 감속 모드에서는 끔
+                        .animation(reduceMotion ? nil : .linear(duration: 0.15), value: tabManager.activeTab?.loadProgress)
                 }.frame(height: 2.5)
                 .accessibilityHidden(true)
             }
             // Address bar pill (★ 스크롤 시 축소)
             if !isToolbarCompact {
                 Button {
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
                     isAddressEditing = true
                     // ★ F5: URL 유지 (사용자가 수정 가능, Safari 방식)
                     addressText = tabManager.activeTab?.url?.absoluteString ?? ""
@@ -455,7 +471,7 @@ struct BrowserContainerView: View {
                             webViewRef?.reload()
                         } label: { Label(isDesktopMode ? "모바일 모드" : "데스크톱 모드", systemImage: isDesktopMode ? "iphone" : "desktopcomputer") }
                         Button {
-                            withAnimation { showFindInPage.toggle() }
+                            withAnimation(reduceMotion ? nil : .default) { showFindInPage.toggle() }
                             if !showFindInPage { clearFindHighlights() }
                         } label: { Label("페이지 내 검색", systemImage: "doc.text.magnifyingglass") }
                         Button {
@@ -467,8 +483,7 @@ struct BrowserContainerView: View {
                                     showReaderMode = true
                                 } else {
                                     // ★ v2.0.5: 실패 시 아무 반응이 없던 문제 → 안내 토스트
-                                    toastIsError = true; toastMessage = "이 페이지는 리더 모드로 볼 수 없습니다"
-                                    Task { try? await Task.sleep(for: .seconds(3)); withAnimation { toastMessage = nil } }
+                                    showToast("이 페이지는 리더 모드로 볼 수 없습니다", isError: true)
                                 }
                             }
                         } label: { Label("리더 모드", systemImage: "doc.plaintext") }
@@ -516,8 +531,27 @@ struct BrowserContainerView: View {
         addressText = url.absoluteString
     }
 
+    /// 토스트 표시 — 새 토스트가 뜨면 이전 타이머는 무시된다
+    private func showToast(_ message: String, isError: Bool = false, seconds: Double = 3) {
+        let token = UUID()
+        toastToken = token
+        toastIsError = isError
+        toastMessage = message
+        UIAccessibility.post(notification: .announcement, argument: message)
+        Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            guard toastToken == token else { return }
+            toastMessage = nil
+        }
+    }
+
+    /// 토스트/스낵바 공용 애니메이션 (감속 모드: 짧은 페이드)
+    private var popAnimation: Animation {
+        reduceMotion ? .easeInOut(duration: 0.15) : .spring(response: 0.35)
+    }
+
     private func closeSearch() {
-        withAnimation(.easeInOut(duration: 0.25)) { isAddressEditing = false }
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) { isAddressEditing = false }
         isURLFieldFocused = false
     }
 
@@ -527,7 +561,7 @@ struct BrowserContainerView: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.system(size: 13))
                 TextField("페이지 내 검색", text: $findText)
-                    .textFieldStyle(.plain).font(.system(size: 15))
+                    .textFieldStyle(.plain).font(.subheadline)
                     .autocorrectionDisabled().textInputAutocapitalization(.never)
                     .focused($isFindFieldFocused)
                     .onSubmit { findInPage(forward: true) }
@@ -558,10 +592,10 @@ struct BrowserContainerView: View {
             }
 
             Button {
-                withAnimation { showFindInPage = false }
+                withAnimation(reduceMotion ? nil : .default) { showFindInPage = false }
                 clearFindHighlights()
             } label: {
-                Text("완료").font(.system(size: 14, weight: .medium)).foregroundStyle(.teal)
+                Text("완료").font(.subheadline.weight(.medium)).foregroundStyle(.teal)
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 2)
@@ -590,9 +624,7 @@ struct BrowserContainerView: View {
                 tabManager.closeAllTabs()
                 tabManager.newTab()
                 DeviceProfileManager.shared.refreshProfile()
-                toastIsError = false
-                toastMessage = "모든 탭과 브라우징 데이터를 지웠습니다"
-                Task { try? await Task.sleep(for: .seconds(3)); withAnimation { toastMessage = nil } }
+                showToast("모든 탭과 브라우징 데이터를 지웠습니다")
             }
         }
     }
@@ -661,7 +693,7 @@ struct NewTabPage: View {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary).font(.system(size: 14))
                     TextField("검색어 또는 주소 입력", text: $searchText)
-                        .textFieldStyle(.plain).font(.system(size: 15))
+                        .textFieldStyle(.plain).font(.subheadline)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .keyboardType(.webSearch).submitLabel(.go)
@@ -687,8 +719,8 @@ struct NewTabPage: View {
                         Image(systemName: "checkmark.shield.fill")
                             .font(.system(size: 22)).foregroundStyle(.green)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("\(total)건 차단").font(.system(size: 16, weight: .bold, design: .rounded))
-                            Text("광고 · 트래커 · 핑거프린팅").font(.system(size: 11)).foregroundStyle(.secondary)
+                            Text("\(total)건 차단").font(.system(.callout, design: .rounded, weight: .bold))
+                            Text("광고 · 트래커 · 핑거프린팅").font(.caption2).foregroundStyle(.secondary)
                         }
                         Spacer()
                     }
@@ -702,7 +734,7 @@ struct NewTabPage: View {
                 VStack(alignment: .leading, spacing: 10) {
                     // ★ v2.0.5: 기본 사이트는 실제 방문 빈도와 무관하므로 "자주 방문" → "바로가기"
                     Text(bookmarkManager.bookmarks.isEmpty ? "바로가기" : "북마크")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary).padding(.leading, 4)
 
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 16) {
@@ -718,7 +750,7 @@ struct NewTabPage: View {
                                             .background(Color.teal.opacity(0.1))
                                             .clipShape(RoundedRectangle(cornerRadius: 14))
                                         Text(bm.title.isEmpty ? (bm.url.host ?? "") : bm.title)
-                                            .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
+                                            .font(.caption2.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
                                     }
                                 }
                             }
@@ -743,7 +775,7 @@ struct NewTabPage: View {
                 Image(systemName: i).font(.system(size: 22, weight: .medium)).foregroundStyle(c)
                     .frame(width: 52, height: 52).background(c.opacity(0.1))
                     .clipShape(RoundedRectangle(cornerRadius: 14))
-                Text(n).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
+                Text(n).font(.caption2.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
             }
         }
     }

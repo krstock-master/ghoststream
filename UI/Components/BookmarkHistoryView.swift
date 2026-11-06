@@ -33,6 +33,7 @@ struct BookmarkHistoryView: View {
                         Button { showAddFolder = true } label: {
                             Image(systemName: "folder.badge.plus").foregroundStyle(.teal)
                         }
+                        .accessibilityLabel("새 폴더")
                     }
                 }
             }
@@ -105,7 +106,8 @@ struct BookmarkHistoryView: View {
             HStack(spacing: 12) {
                 Image(systemName: "bookmark.fill").foregroundStyle(.teal).frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(bm.title).font(.subheadline).lineLimit(1).foregroundStyle(.primary)
+                    Text(bm.title.isEmpty ? (bm.url.host ?? bm.url.absoluteString) : bm.title)
+                        .font(.subheadline).lineLimit(1).foregroundStyle(.primary)
                     Text(bm.url.host ?? bm.url.absoluteString)
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -145,7 +147,8 @@ struct BookmarkHistoryView: View {
                                     HStack(spacing: 12) {
                                         Image(systemName: "clock").foregroundStyle(.secondary).frame(width: 24)
                                         VStack(alignment: .leading, spacing: 2) {
-                                            Text(entry.title).font(.subheadline).lineLimit(1).foregroundStyle(.primary)
+                                            Text(entry.title.isEmpty ? (entry.url.host ?? entry.url.absoluteString) : entry.title)
+                                                .font(.subheadline).lineLimit(1).foregroundStyle(.primary)
                                             Text(entry.url.host ?? "")
                                                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                         }
