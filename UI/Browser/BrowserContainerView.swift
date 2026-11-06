@@ -116,7 +116,7 @@ struct BrowserContainerView: View {
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.panel))
                 .shadow(color: .black.opacity(0.1), radius: 8, y: 4)
                 .padding(.horizontal, 16).padding(.top, 54)
-                .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+                .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .top).combined(with: .opacity))
                 .accessibilityElement(children: .contain)
             }
             }
@@ -126,7 +126,7 @@ struct BrowserContainerView: View {
             VStack {
             if showMediaSnackbar, let media = latestMedia {
                 snackbar(media).padding(.horizontal, 16).padding(.bottom, isAddressEditing ? 12 : 130)
-                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                    .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .bottom).combined(with: .opacity))
             }
             }
             .animation(popAnimation, value: showMediaSnackbar)
