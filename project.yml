@@ -27,7 +27,7 @@ settings:
 packages:
   GhostStreamCore:
     url: https://github.com/krstock-master/ghoststream-core.git
-    from: 1.0.0
+    revision: 215510716fd8010e56a6a1cdfe0aedd4bda3c192
 
 targets:
   GhostStream:
